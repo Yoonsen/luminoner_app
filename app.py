@@ -116,13 +116,13 @@ with colA:
     MODEL = st.selectbox(
         "Modell",
         ["gpt-4o-mini", "gpt-5-mini", "gpt-4"],
-        index=0,
+        index=1,
         help="gpt-4 er dyrere – bruk den kun på små tester."
     )
 with colB:
     BATCH_SIZE = st.number_input("Batch-størrelse", 10, 500, 10, 10)
 with colC:
-    TEMP = st.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
+    TEMP = st.slider("Temperature", 0.0, 1.0, 1.0, 0.1)
 with colD:
     MAX_WORDS = st.number_input("Maks ord per linje", 5, 60, 25, 1)
 
