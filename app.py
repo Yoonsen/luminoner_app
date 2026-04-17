@@ -1,9 +1,10 @@
 # app.py
-import json, io, csv, time, random
+import json, io, csv, time, random, hashlib
 from typing import List, Dict, Any
 import streamlit as st
 from openai import OpenAI
 import os
+from pathlib import Path
 
 try:
     import pandas as pd
@@ -36,6 +37,7 @@ INITIAL_CATEGORY_FIELDS = [
 
 META_ROW_INDEX_KEY = "__luminoner_input_index"
 META_RECORD_ID_KEY = "__luminoner_internal_id"
+RUNS_DIR_NAME = "runs"
 CATEGORY_MODE_LABELS = {"unique": "Unik", "list": "Liste"}
 PROMPT_SUPPORT_OPTIONS = [
     {
@@ -452,13 +454,109 @@ def build_excel_bytes(
         return None, str(e)
 
 
+def ensure_runs_dir() -> Path:
+    runs_dir = Path(RUNS_DIR_NAME)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    return runs_dir
+
+
+def _ts_now() -> str:
+    return time.strftime("%Y-%m-%dT%H-%M-%S")
+
+
+def make_run_id(run_mode: str) -> str:
+    return f"{_ts_now()}_{run_mode}_{random.randint(1000, 9999)}"
+
+
+def compute_entries_signature(entries: List[Dict[str, Any]]) -> str:
+    payload = [
+        {
+            "fragment": str(entry.get("fragment", "")),
+            "source_row_index": entry.get("source_row_index"),
+        }
+        for entry in entries
+    ]
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return digest
+
+
+def compute_prompt_signature(prompt_text: str) -> str:
+    return hashlib.sha256((prompt_text or "").encode("utf-8")).hexdigest()
+
+
+def run_paths(run_id: str) -> tuple[Path, Path]:
+    runs_dir = ensure_runs_dir()
+    return runs_dir / f"{run_id}.jsonl", runs_dir / f"{run_id}.meta.json"
+
+
+def append_jsonl_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    with path.open("a", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def load_jsonl_rows(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                out.append(item)
+    return out
+
+
+def save_run_meta(path: Path, payload: Dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def load_run_meta(path: Path) -> Dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def list_recent_run_metas(limit: int = 40) -> List[Dict[str, Any]]:
+    runs_dir = ensure_runs_dir()
+    metas: List[Dict[str, Any]] = []
+    for meta_path in sorted(runs_dir.glob("*.meta.json"), reverse=True):
+        meta = load_run_meta(meta_path)
+        if not meta:
+            continue
+        meta["meta_path"] = str(meta_path)
+        metas.append(meta)
+        if len(metas) >= limit:
+            break
+    return metas
+
+
 # ---------- Data inn ----------
 render_section_title("Data inn – konkordanser og merking")
 st.caption(
     "Legg inn data som fritekst, CSV/TSV eller Excel. "
     "Velg deretter fragmentkolonne og target-markører."
 )
-src = st.radio("Kilde", ["Lim inn", "Last opp CSV/TSV/Excel"], horizontal=True)
+src = st.radio(
+    "Kilde",
+    ["Lim inn", "Last opp CSV/TSV/Excel"],
+    index=1,
+    horizontal=True,
+)
 
 example_rows = [
     {
@@ -851,9 +949,6 @@ Formatkrav (viktig):
 - Behold alle id-er du får, og ikke oppfinn nye.
 """
 
-with st.expander("Tekniske formatkrav (JSON)", expanded=False):
-    st.code(TECH_PROMPT)
-
 # dette er faktiske systemprompt
 prompt = TASK_PROMPT.strip() + "\n\n" + TECH_PROMPT
 with st.expander("Forhåndsvis hele prompten (sendes til modellen)", expanded=False):
@@ -938,6 +1033,52 @@ with run_groups[1]:
             use_container_width=True,
             disabled=sample_disabled,
         )
+
+entries_signature = compute_entries_signature(input_entries) if input_entries else ""
+prompt_signature = compute_prompt_signature(prompt)
+resume_candidates: List[Dict[str, Any]] = []
+if entries_count:
+    for meta in list_recent_run_metas():
+        if meta.get("status") == "completed":
+            continue
+        if meta.get("run_mode") != "all":
+            continue
+        if meta.get("entries_signature") != entries_signature:
+            continue
+        if meta.get("prompt_signature") != prompt_signature:
+            continue
+        if meta.get("model") != MODEL:
+            continue
+        resume_candidates.append(meta)
+
+resume_run_id: str | None = None
+if resume_candidates:
+    with st.container(border=True):
+        st.markdown("**Gjenoppta avbrutt kjøring**")
+        resume_labels = []
+        for item in resume_candidates:
+            processed = int(item.get("processed_records", 0))
+            total_records = int(item.get("total_records", 0))
+            rid = str(item.get("run_id", "ukjent"))
+            updated = str(item.get("updated_at", ""))
+            resume_labels.append(f"{rid} ({processed}/{total_records}) – sist oppdatert {updated}")
+        selected_resume_label = st.selectbox(
+            "Tilgjengelige avbrutte kjøringer",
+            options=resume_labels,
+            key="resume_run_label_select",
+        )
+        selected_index = resume_labels.index(selected_resume_label)
+        selected_resume_id = str(resume_candidates[selected_index].get("run_id"))
+        use_resume = st.checkbox(
+            "Bruk denne når du trykker «Kjør alt»",
+            value=False,
+            key="resume_run_use_toggle",
+        )
+        if use_resume:
+            resume_run_id = selected_resume_id
+            st.caption("Full kjøring vil fortsette fra valgt checkpoint.")
+        else:
+            st.caption("Full kjøring starter på nytt (du kan slå på gjenoppta når som helst).")
 
 entries_to_process: List[Dict[str, Any]] | None = None
 run_mode = None
@@ -1026,13 +1167,53 @@ def parse_items(raw_text: str) -> List[Dict[str, Any]]:
 to_run_entries = entries_to_process or []
 if to_run_entries:
     run_desc = "sample" if run_mode == "sample" else "alle rader"
-    st.info(f"Starter kjøring ({run_desc})…")
+    st.info(f"Starter kjøring ({run_desc})… Resultater lagres fortløpende i checkpoint-fil.")
     all_rows: List[Dict[str, Any]] = []
     recs = build_records(to_run_entries)
     total = len(recs)
+
+    selected_resume_id = resume_run_id if run_mode == "all" else None
+    is_resume = bool(selected_resume_id)
+    if is_resume and selected_resume_id:
+        run_id = selected_resume_id
+    else:
+        run_id = make_run_id(run_mode or "run")
+    run_jsonl_path, run_meta_path = run_paths(run_id)
+
+    if is_resume:
+        all_rows = load_jsonl_rows(run_jsonl_path)
+        st.info(f"Gjenopptar avbrutt kjøring: {run_id}")
+    else:
+        run_jsonl_path.write_text("", encoding="utf-8")
+
+    processed_ids = {
+        int(row.get(META_RECORD_ID_KEY))
+        for row in all_rows
+        if str(row.get(META_RECORD_ID_KEY, "")).isdigit()
+    }
+    pending_recs = [rec for rec in recs if rec["id"] not in processed_ids]
+    done = len(processed_ids)
+
+    run_meta: Dict[str, Any] = {
+        "run_id": run_id,
+        "status": "running",
+        "created_at": _ts_now(),
+        "updated_at": _ts_now(),
+        "run_mode": run_mode,
+        "model": MODEL,
+        "temperature": TEMP,
+        "batch_size": int(BATCH_SIZE),
+        "total_records": total,
+        "processed_records": done,
+        "entries_signature": entries_signature,
+        "prompt_signature": prompt_signature,
+        "jsonl_path": str(run_jsonl_path),
+    }
+    save_run_meta(run_meta_path, run_meta)
+
     progress = st.progress(0.0)
     status = st.empty()
-    done = 0
+    progress.progress(done / total if total else 1.0)
     batch_counter = 0
     record_lookup = {rec["id"]: rec for rec in recs}
 
@@ -1050,9 +1231,10 @@ if to_run_entries:
         base["temperature"] = TEMP
         return base
 
-    for batch in chunks(recs, int(BATCH_SIZE)):
+    for batch in chunks(pending_recs, int(BATCH_SIZE)):
         batch_counter += 1
         user_msg = build_user_msg(batch)
+        batch_rows: List[Dict[str, Any]] = []
 
         try:
             r = client.chat.completions.create(
@@ -1096,6 +1278,7 @@ if to_run_entries:
                 for geo in geo_fields_active:
                     row[geo["key"]] = normalize_single_value(it.get(geo["key"], ""))
                 all_rows.append(row)
+                batch_rows.append(row)
 
             got_ids = {it.get("id") for it in items}
             for r in batch:
@@ -1111,6 +1294,7 @@ if to_run_entries:
                     for geo in geo_fields_active:
                         row[geo["key"]] = "feil"
                     all_rows.append(row)
+                    batch_rows.append(row)
 
         except Exception as e:
             for r in batch:
@@ -1125,10 +1309,22 @@ if to_run_entries:
                 for geo in geo_fields_active:
                     row[geo["key"]] = "feil"
                 all_rows.append(row)
+                batch_rows.append(row)
+
+        append_jsonl_rows(run_jsonl_path, batch_rows)
 
         done += len(batch)
         progress.progress(done / total)
         status.write(f"Ferdig: {done}/{total}")
+        run_meta["processed_records"] = done
+        run_meta["updated_at"] = _ts_now()
+        save_run_meta(run_meta_path, run_meta)
+
+    run_meta["status"] = "completed"
+    run_meta["processed_records"] = done
+    run_meta["updated_at"] = _ts_now()
+    save_run_meta(run_meta_path, run_meta)
+    status.write(f"Ferdig: {done}/{total} (checkpoint: {run_id})")
 
     if all_rows:
         def _row_sort_key(row: Dict[str, Any]):
@@ -1238,7 +1434,9 @@ if to_run_entries:
         st.success("Kjøring ferdig ✅")
         if run_mode == "sample":
             st.info("Dette var et sample – bruk «Kjør alt» for å prosessere alle rader.")
-        download_cols = st.columns(3)
+        checkpoint_jsonl_bytes = run_jsonl_path.read_bytes() if run_jsonl_path.exists() else b""
+        st.caption(f"Checkpoint-id: {run_id}")
+        download_cols = st.columns(4)
         with download_cols[0]:
             st.download_button(
                 "Last ned JSONL",
@@ -1264,4 +1462,12 @@ if to_run_entries:
             else:
                 st.caption(
                     f"Excel-eksport er ikke tilgjengelig i dette miljøet: {excel_export_error or 'ukjent feil'}"
+                )
+        with download_cols[3]:
+            if checkpoint_jsonl_bytes:
+                st.download_button(
+                    "Last ned checkpoint (JSONL)",
+                    data=checkpoint_jsonl_bytes,
+                    file_name=f"{run_id}.jsonl",
+                    mime="application/jsonl",
                 )
