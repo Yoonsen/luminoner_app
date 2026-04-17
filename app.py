@@ -169,6 +169,32 @@ def normalize_field_spec_entries(raw_fields: Any) -> List[Dict[str, Any]]:
         )
     return normalized
 
+
+def suggest_batch_size(total_rows: int, model_name: str) -> int:
+    """
+    Enkel heuristikk for batch-størrelse basert på modell og datamengde.
+    Prioriterer stabilitet for små/medium kjøringer.
+    """
+    if total_rows <= 0:
+        return 10
+
+    model_name = (model_name or "").strip().lower()
+    if model_name == "gpt-5-nano":
+        base = 30
+    elif model_name == "gpt-5-mini":
+        base = 20
+    else:
+        base = 20
+
+    if total_rows < 100:
+        suggested = min(base, 20)
+    elif total_rows < 500:
+        suggested = base
+    else:
+        suggested = min(base + 10, 40)
+
+    return max(10, min(500, int(suggested)))
+
 # ---------- Konfig ----------
 API_KEY = secret_or_env("OPENAI_API_KEY")
 if not API_KEY:
@@ -1133,6 +1159,7 @@ with st.expander("Forhåndsvis hele prompten (sendes til modellen)", expanded=Fa
     st.code(prompt)
 
 # ---------- Sample og kjøring ----------
+entries_count = len(input_entries)
 render_section_title("Modell og kjøring")
 model_cols = st.columns([1.3, 1, 1])
 model_options = ["gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4"]
@@ -1161,6 +1188,12 @@ with model_cols[1]:
             key="batch_size_input",
         )
     )
+    suggested_batch = suggest_batch_size(entries_count, MODEL)
+    if entries_count:
+        st.caption(f"Anbefalt batch for {MODEL}: {suggested_batch}")
+        if st.button("Bruk anbefalt batch", key="apply_suggested_batch", use_container_width=True):
+            st.session_state["batch_size_input"] = suggested_batch
+            st.rerun()
 with model_cols[2]:
     TEMP = float(
         st.slider(
@@ -1179,7 +1212,6 @@ else:
     st.caption("Anbefalt oppsett for gpt-5-mini/gpt-5-nano: temperature 1.0.")
 
 render_section_subtitle("Estimat og kjørevalg")
-entries_count = len(input_entries)
 sample_disabled = entries_count == 0
 run_target_count = 0
 if entries_count == 0:
