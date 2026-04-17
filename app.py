@@ -230,6 +230,7 @@ with spec_cols[0]:
         file_name="luminoner_feltspec.json",
         mime="application/json",
         use_container_width=False,
+        on_click="ignore",
     )
 with spec_cols[1]:
     uploaded_field_spec = st.file_uploader(
@@ -312,6 +313,8 @@ for idx, entry in enumerate(entries):
             horizontal=True,
             help="Unik = én verdi. Liste = 0–3 verdier fra samme vokabular.",
         )
+        entry["label"] = label_val
+        entry["values"] = values_val
         entry["mode"] = mode_val
         if col_remove.button(
             "Fjern",
@@ -665,8 +668,8 @@ def render_results_panel(
     checkpoint_jsonl_bytes = checkpoint_path.read_bytes() if checkpoint_path and checkpoint_path.exists() else b""
     if run_id:
         st.caption(f"Checkpoint-id: {run_id}")
-    if run_mode == "sample":
-        st.info("Dette var et sample – bruk «Kjør alt» for å prosessere alle rader.")
+    if run_mode != "all":
+        st.info("Dette var en delkjøring – sett slider til alle rader for full kjøring.")
 
     download_cols = st.columns(4)
     with download_cols[0]:
@@ -675,6 +678,7 @@ def render_results_panel(
             data=jsonl_bytes,
             file_name=f"luminoner_{ts}.jsonl",
             mime="application/jsonl",
+            on_click="ignore",
         )
     with download_cols[1]:
         st.download_button(
@@ -682,6 +686,7 @@ def render_results_panel(
             data=csv_bytes,
             file_name=f"luminoner_{ts}.csv",
             mime="text/csv",
+            on_click="ignore",
         )
     with download_cols[2]:
         if excel_bytes:
@@ -690,6 +695,7 @@ def render_results_panel(
                 data=excel_bytes,
                 file_name=f"luminoner_{ts}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                on_click="ignore",
             )
         else:
             st.caption(
@@ -702,6 +708,7 @@ def render_results_panel(
                 data=checkpoint_jsonl_bytes,
                 file_name=f"{run_id or 'checkpoint'}.jsonl",
                 mime="application/jsonl",
+                on_click="ignore",
             )
 
 
@@ -711,6 +718,15 @@ st.caption(
     "Legg inn data som fritekst, CSV/TSV eller Excel. "
     "Velg deretter fragmentkolonne og target-markører."
 )
+with st.expander("Personvern og databruk", expanded=False):
+    st.markdown(
+        "- Denne appen er ment for **offentlig publisert materiale**.\n"
+        "- Metadata kan godt finnes i opplastet materiale, men modellen får kun selve konkordans-fragmentet.\n"
+        "- Vi sender kun et sekvensnummer + fragmenttekst i modellkallet; sekvensnummeret brukes for å matche svar tilbake.\n"
+        "- Originale metadata beholdes lokalt i appflyten og sendes ikke til modellen.\n"
+        "- Selv korte fragmenter kan i enkelte tilfeller være gjenkjennelige; følg prosjektets retningslinjer.\n"
+        "- Appen er passordbeskyttet, men vurderingen av hva som kan sendes til ekstern modell er fortsatt et faglig/administrativt ansvar."
+    )
 src = st.radio(
     "Kilde",
     ["Lim inn", "Last opp CSV/TSV/Excel"],
@@ -751,6 +767,7 @@ with st.expander("Eksempelfiler for opplasting", expanded=False):
             data=example_csv_bytes,
             file_name="luminoner_eksempel.csv",
             mime="text/csv",
+            on_click="ignore",
         )
     with sample_cols[1]:
         if example_xlsx_bytes:
@@ -759,6 +776,7 @@ with st.expander("Eksempelfiler for opplasting", expanded=False):
                 data=example_xlsx_bytes,
                 file_name="luminoner_eksempel.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                on_click="ignore",
             )
         else:
             st.caption(
@@ -1117,7 +1135,7 @@ with st.expander("Forhåndsvis hele prompten (sendes til modellen)", expanded=Fa
 # ---------- Sample og kjøring ----------
 render_section_title("Modell og kjøring")
 model_cols = st.columns([1.3, 1, 1])
-model_options = ["gpt-5-mini", "gpt-4o-mini", "gpt-4"]
+model_options = ["gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4"]
 model_default = st.session_state.get("model_select", "gpt-5-mini")
 if model_default not in model_options:
     model_default = "gpt-5-mini"
@@ -1127,8 +1145,12 @@ with model_cols[0]:
         model_options,
         index=model_options.index(model_default),
         key="model_select",
-        help="Anbefalt: gpt-5-mini. gpt-4 er dyrere; gpt-4o-mini kan testes.",
+        help="Anbefalt: gpt-5-mini eller gpt-5-nano. gpt-4 er dyrere; gpt-4o-mini kan testes.",
     )
+temp_locked_models = {"gpt-5-mini", "gpt-5-nano"}
+temperature_locked = MODEL in temp_locked_models
+if temperature_locked:
+    st.session_state["temp_input"] = 1.0
 with model_cols[1]:
     BATCH_SIZE = int(
         st.number_input(
@@ -1147,52 +1169,55 @@ with model_cols[2]:
             max_value=1.0,
             step=0.1,
             key="temp_input",
+            disabled=temperature_locked,
         )
     )
-st.caption("Standardoppsett: gpt-5-mini med temperature 1.0.")
+if temperature_locked:
+    TEMP = 1.0
+    st.caption(f"Temperature er låst til 1.0 for {MODEL}.")
+else:
+    st.caption("Anbefalt oppsett for gpt-5-mini/gpt-5-nano: temperature 1.0.")
 
 render_section_subtitle("Estimat og kjørevalg")
 entries_count = len(input_entries)
 sample_disabled = entries_count == 0
-sample_max_value = entries_count or 1
-sample_default = min(10, sample_max_value)
-st.caption("Velg enten testkjøring (sample) eller full kjøring av alle rader.")
-run_groups = st.columns(2)
-with run_groups[0]:
-    with st.container(border=True):
-        st.markdown("**Testkjøring (sample)**")
-        sample_size = st.number_input(
-            "Antall linjer i sample",
-            min_value=1,
-            max_value=sample_max_value,
-            value=sample_default,
+run_target_count = 0
+if entries_count == 0:
+    st.caption("Ingen rader valgt ennå.")
+elif entries_count == 1:
+    run_target_count = 1
+    st.caption("Datasettet har 1 rad. Kjøring skjer på hele datasettet.")
+else:
+    slider_min = 10 if entries_count >= 10 else 1
+    slider_max = entries_count
+    slider_default = slider_max
+    slider_label = (
+        "Antall rader å kjøre (10 til alle)"
+        if entries_count >= 10
+        else "Antall rader å kjøre (1 til alle)"
+    )
+    run_target_count = int(
+        st.slider(
+            slider_label,
+            min_value=slider_min,
+            max_value=slider_max,
+            value=slider_default,
             step=1,
-            disabled=sample_disabled,
-            help="Velg hvor mange rader som brukes når du kjører sample.",
+            help="Dra helt til høyre for å kjøre alle rader.",
         )
-        sample_shuffle = st.checkbox(
-            "Tilfeldig sample",
-            value=True,
-            disabled=sample_disabled,
-            help="Når aktivert velges samplet tilfeldig før det sorteres.",
-        )
-        run_sample = st.button(
-            "Kjør testsample",
-            use_container_width=True,
-            disabled=sample_disabled,
-        )
-with run_groups[1]:
-    with st.container(border=True):
-        st.markdown("**Full kjøring (alle rader)**")
-        st.caption(
-            "Kjør hele datasettet med valgt modell og innstillinger."
-        )
-        run_all = st.button(
-            "Kjør alt",
-            type="primary",
-            use_container_width=True,
-            disabled=sample_disabled,
-        )
+    )
+
+if entries_count:
+    if run_target_count >= entries_count:
+        st.caption(f"Klar til å kjøre alle {entries_count} rader.")
+    else:
+        st.caption(f"Klar til å kjøre de første {run_target_count} radene.")
+run_analysis = st.button(
+    "Kjør analyse",
+    type="primary",
+    use_container_width=True,
+    disabled=sample_disabled,
+)
 
 request_stop_after_batch = st.button(
     "Avslutt og vis data så langt",
@@ -1207,13 +1232,13 @@ if st.session_state.get("stop_after_batch_requested"):
 
 entries_to_process: List[Dict[str, Any]] | None = None
 run_mode = None
-if run_all and entries_count:
-    entries_to_process = input_entries
-    run_mode = "all"
-elif run_sample and entries_count:
-    sample_target = min(int(sample_size), entries_count)
-    entries_to_process = pick_sample(input_entries, sample_target, sample_shuffle)
-    run_mode = "sample"
+if run_analysis and entries_count:
+    if run_target_count >= entries_count:
+        entries_to_process = input_entries
+        run_mode = "all"
+    else:
+        entries_to_process = input_entries[:run_target_count]
+        run_mode = "subset"
 
 if entries_count:
     approx_all_in = entries_count * 40
@@ -1223,11 +1248,11 @@ if entries_count:
         f"in ≈ {approx_all_in:,} · out ≈ {approx_all_out:,} · "
         f"total ≈ {approx_all_in + approx_all_out:,}"
     )
-    sample_preview = min(int(sample_size), entries_count)
-    approx_sample_in = sample_preview * 40
-    approx_sample_out = sample_preview * 20
+    preview_count = min(int(run_target_count), entries_count)
+    approx_sample_in = preview_count * 40
+    approx_sample_out = preview_count * 20
     st.caption(
-        f"Et sample på {sample_preview} rader vil bruke ca. "
+        f"Kjøring av {preview_count} rader vil bruke ca. "
         f"in ≈ {approx_sample_in:,} · out ≈ {approx_sample_out:,} tokens."
     )
 else:
@@ -1291,7 +1316,7 @@ def parse_items(raw_text: str) -> List[Dict[str, Any]]:
 # ---------- Kjøring ----------
 to_run_entries = entries_to_process or []
 if to_run_entries:
-    run_desc = "sample" if run_mode == "sample" else "alle rader"
+    run_desc = "delmengde" if run_mode != "all" else "alle rader"
     st.info(f"Starter kjøring ({run_desc})… Resultater lagres fortløpende i checkpoint-fil.")
     all_rows: List[Dict[str, Any]] = []
     recs = build_records(to_run_entries)
