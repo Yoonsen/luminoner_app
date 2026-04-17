@@ -1,5 +1,5 @@
 # app.py
-import json, io, csv, time, random, hashlib
+import json, io, csv, time, random
 from typing import List, Dict, Any
 import streamlit as st
 from openai import OpenAI
@@ -31,7 +31,6 @@ INITIAL_CATEGORY_FIELDS = [
         "values": "bokstavelig, metaforisk",
         "mode": "list",
         "prompt_note": "",
-        "prompt_support_labels": [],
     },
 ]
 
@@ -39,31 +38,6 @@ META_ROW_INDEX_KEY = "__luminoner_input_index"
 META_RECORD_ID_KEY = "__luminoner_internal_id"
 RUNS_DIR_NAME = "runs"
 CATEGORY_MODE_LABELS = {"unique": "Unik", "list": "Liste"}
-PROMPT_SUPPORT_OPTIONS = [
-    {
-        "label": "Fokuser på betydning",
-        "text": "Vurder semantisk betydning i konteksten, ikke bare ordform.",
-    },
-    {
-        "label": "Vær konservativ",
-        "text": "Ved tvil: velg den mest konservative koden og unngå overtolkning.",
-    },
-    {
-        "label": "Ekskluder temaord",
-        "text": "Ikke bruk rene temaord hvis de ikke beskriver målordets funksjon.",
-    },
-    {
-        "label": "Skille bokstavelig/metaforisk",
-        "text": "Skille tydelig mellom bokstavelig og metaforisk bruk.",
-    },
-    {
-        "label": "Bruk kontekst før/etter",
-        "text": "Bruk både venstre og høyre kontekst aktivt når koden velges.",
-    },
-]
-PROMPT_SUPPORT_TEXT_BY_LABEL = {
-    option["label"]: option["text"] for option in PROMPT_SUPPORT_OPTIONS
-}
 DEFAULT_TARGET_MARKER_LEFT = "<b>"
 DEFAULT_TARGET_MARKER_RIGHT = "</b>"
 GEO_FIELD_OPTIONS = [
@@ -172,6 +146,29 @@ def render_section_subtitle(text: str):
         f'<div class="lum-section-subtitle">{text}</div>', unsafe_allow_html=True
     )
 
+
+def normalize_field_spec_entries(raw_fields: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_fields, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, item in enumerate(raw_fields):
+        if not isinstance(item, dict):
+            continue
+        mode = str(item.get("mode", "list")).strip().lower()
+        if mode not in {"unique", "list"}:
+            mode = "list"
+        normalized.append(
+            {
+                "id": idx,
+                "label": str(item.get("label", "")).strip(),
+                "values": str(item.get("values", "")).strip(),
+                "mode": mode,
+                "prompt_note": str(item.get("prompt_note", "")).strip(),
+            }
+        )
+    return normalized
+
 # ---------- Konfig ----------
 API_KEY = secret_or_env("OPENAI_API_KEY")
 if not API_KEY:
@@ -203,9 +200,6 @@ st.caption(
 st.caption(
     "Legg gjerne inn «Prompt-utvidelse» per felt for ekstra tolkningsregler. Feltet kan stå tomt."
 )
-st.caption(
-    "Du kan også velge ferdige prompt-støtter per felt for å gjøre oppsettet raskere."
-)
 
 if "category_field_entries" not in st.session_state:
     st.session_state["category_field_entries"] = [
@@ -215,6 +209,66 @@ if "category_field_entries" not in st.session_state:
 
 entries = st.session_state["category_field_entries"]
 
+field_spec_export = {
+    "version": 1,
+    "fields": [
+        {
+            "label": str(entry.get("label", "")).strip(),
+            "values": str(entry.get("values", "")).strip(),
+            "mode": str(entry.get("mode", "list")).strip(),
+            "prompt_note": str(entry.get("prompt_note", "")).strip(),
+        }
+        for entry in entries
+    ],
+}
+field_spec_bytes = json.dumps(field_spec_export, ensure_ascii=False, indent=2).encode("utf-8")
+spec_cols = st.columns([1, 1, 3])
+with spec_cols[0]:
+    st.download_button(
+        "Last ned feltspec (JSON)",
+        data=field_spec_bytes,
+        file_name="luminoner_feltspec.json",
+        mime="application/json",
+        use_container_width=False,
+    )
+with spec_cols[1]:
+    uploaded_field_spec = st.file_uploader(
+        "Last opp feltspec (JSON)",
+        type=["json"],
+        key="field_spec_upload",
+        help="Laster kun inn feltdefinisjoner (feltnavn, verdier, variant og prompt-utvidelser).",
+    )
+    if uploaded_field_spec is not None and st.button(
+        "Bruk opplastet feltspec",
+        key="apply_field_spec_button",
+        use_container_width=False,
+    ):
+        try:
+            parsed_spec = json.loads(uploaded_field_spec.getvalue().decode("utf-8"))
+            raw_fields = (
+                parsed_spec.get("fields", [])
+                if isinstance(parsed_spec, dict)
+                else parsed_spec
+            )
+            imported_entries = normalize_field_spec_entries(raw_fields)
+            if not imported_entries:
+                st.error("Fant ingen gyldige felt i feltspec-filen.")
+            else:
+                st.session_state["category_field_entries"] = imported_entries
+                st.session_state["category_field_counter"] = len(imported_entries)
+                for imported_entry in imported_entries:
+                    eid = imported_entry["id"]
+                    st.session_state[f"category_field_label_{eid}"] = imported_entry.get("label", "")
+                    st.session_state[f"category_field_values_{eid}"] = imported_entry.get("values", "")
+                    st.session_state[f"category_field_mode_{eid}"] = imported_entry.get("mode", "list")
+                    st.session_state[f"category_field_prompt_note_{eid}"] = imported_entry.get("prompt_note", "")
+                st.success(f"Lastet inn {len(imported_entries)} felt fra feltspec.")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Kunne ikke lese feltspec: {e}")
+with spec_cols[2]:
+    st.caption("Tips: Lagre feltspec for gjenbruk i nye analyser.")
+
 if "target_marker_left_input" not in st.session_state:
     st.session_state["target_marker_left_input"] = DEFAULT_TARGET_MARKER_LEFT
 if "target_marker_right_input" not in st.session_state:
@@ -223,6 +277,10 @@ for option in GEO_FIELD_OPTIONS:
     state_key = f"geo_option_{option['key']}"
     if state_key not in st.session_state:
         st.session_state[state_key] = option.get("default", False)
+
+st.divider()
+st.markdown("**Definer felter**")
+st.caption("Legg inn feltnavn, verdier, variant og eventuell prompt-utvidelse per felt.")
 
 category_fields: List[Dict[str, Any]] = []
 used_keys = set()
@@ -271,19 +329,6 @@ for idx, entry in enumerate(entries):
             help="Ekstra instruks for dette feltet. Brukes direkte i den genererte prompten.",
         ).strip()
         entry["prompt_note"] = prompt_note_val
-        support_default = [
-            label
-            for label in entry.get("prompt_support_labels", [])
-            if label in PROMPT_SUPPORT_TEXT_BY_LABEL
-        ]
-        prompt_support_labels = st.multiselect(
-            "Prompt-støtte (hurtigvalg)",
-            options=list(PROMPT_SUPPORT_TEXT_BY_LABEL.keys()),
-            default=support_default,
-            key=f"category_field_prompt_support_{entry['id']}",
-            help="Velg én eller flere ferdige føringer som legges til dette feltet.",
-        )
-        entry["prompt_support_labels"] = prompt_support_labels
 
     display_label = label_val or f"Felt {idx + 1}"
     field_key = display_label
@@ -300,19 +345,6 @@ for idx, entry in enumerate(entries):
     field_values = [t for t in tokens if t]
     if CATCH_ALL_VALUE not in field_values:
         field_values.append(CATCH_ALL_VALUE)
-    support_texts = [
-        PROMPT_SUPPORT_TEXT_BY_LABEL[label]
-        for label in prompt_support_labels
-        if label in PROMPT_SUPPORT_TEXT_BY_LABEL
-    ]
-    combined_prompt_note = prompt_note_val
-    if support_texts:
-        support_block = " ".join(support_texts)
-        combined_prompt_note = (
-            f"{prompt_note_val} {support_block}".strip()
-            if prompt_note_val
-            else support_block
-        )
 
     category_fields.append(
         {
@@ -320,7 +352,7 @@ for idx, entry in enumerate(entries):
             "key": field_key,
             "values": field_values,
             "mode": mode_val,
-            "prompt_note": combined_prompt_note,
+            "prompt_note": prompt_note_val,
         }
     )
 
@@ -335,7 +367,6 @@ with action_cols[0]:
                 "values": "",
                 "mode": "list",
                 "prompt_note": "",
-                "prompt_support_labels": [],
             }
         )
         st.session_state["category_field_counter"] = next_id + 1
@@ -468,24 +499,6 @@ def make_run_id(run_mode: str) -> str:
     return f"{_ts_now()}_{run_mode}_{random.randint(1000, 9999)}"
 
 
-def compute_entries_signature(entries: List[Dict[str, Any]]) -> str:
-    payload = [
-        {
-            "fragment": str(entry.get("fragment", "")),
-            "source_row_index": entry.get("source_row_index"),
-        }
-        for entry in entries
-    ]
-    digest = hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    ).hexdigest()
-    return digest
-
-
-def compute_prompt_signature(prompt_text: str) -> str:
-    return hashlib.sha256((prompt_text or "").encode("utf-8")).hexdigest()
-
-
 def run_paths(run_id: str) -> tuple[Path, Path]:
     runs_dir = ensure_runs_dir()
     return runs_dir / f"{run_id}.jsonl", runs_dir / f"{run_id}.meta.json"
@@ -522,27 +535,174 @@ def save_run_meta(path: Path, payload: Dict[str, Any]) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
-def load_run_meta(path: Path) -> Dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+def clean_output_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cleaned = [dict(row) for row in rows]
+    if not cleaned:
+        return cleaned
+
+    def _row_sort_key(row: Dict[str, Any]):
+        idx = row.get(META_ROW_INDEX_KEY)
+        if idx is None:
+            idx = row.get(META_RECORD_ID_KEY, 0)
+        return (idx, row.get(META_RECORD_ID_KEY, 0))
+
+    cleaned.sort(key=_row_sort_key)
+    for row in cleaned:
+        row.pop(META_ROW_INDEX_KEY, None)
+        row.pop(META_RECORD_ID_KEY, None)
+    return cleaned
 
 
-def list_recent_run_metas(limit: int = 40) -> List[Dict[str, Any]]:
-    runs_dir = ensure_runs_dir()
-    metas: List[Dict[str, Any]] = []
-    for meta_path in sorted(runs_dir.glob("*.meta.json"), reverse=True):
-        meta = load_run_meta(meta_path)
-        if not meta:
-            continue
-        meta["meta_path"] = str(meta_path)
-        metas.append(meta)
-        if len(metas) >= limit:
-            break
-    return metas
+def build_export_payloads(
+    rows: List[Dict[str, Any]],
+    category_fields: List[Dict[str, Any]],
+    geo_fields_active: List[Dict[str, Any]],
+    source_headers: List[str],
+) -> tuple[bytes, bytes, bytes | None, str | None]:
+    jsonl_buf = io.StringIO()
+    for obj in rows:
+        jsonl_buf.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    jsonl_bytes = jsonl_buf.getvalue().encode("utf-8")
+
+    csv_buf = io.StringIO()
+    ordered_keys: List[str] = []
+    for o in rows:
+        for k in o.keys():
+            if k not in ordered_keys:
+                ordered_keys.append(k)
+    geo_field_keys = [g["key"] for g in geo_fields_active]
+    analysis_order = (
+        [c["key"] for c in category_fields]
+        + geo_field_keys
+        + [
+            "karakteristikker",
+            "begrunnelse",
+        ]
+    )
+    source_keys = [k for k in source_headers if k in ordered_keys]
+    fieldnames: List[str] = []
+
+    def _extend(keys: List[str]):
+        for key in keys:
+            if not key:
+                continue
+            if key not in fieldnames:
+                fieldnames.append(key)
+
+    _extend(analysis_order)
+    _extend(source_keys)
+    remaining = [k for k in ordered_keys if k not in fieldnames]
+    _extend(remaining)
+    writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
+    writer.writeheader()
+    export_rows_for_table: List[Dict[str, Any]] = []
+    for o in rows:
+        o2 = {k: o.get(k, "") for k in fieldnames}
+        if isinstance(o2.get("karakteristikker"), list):
+            o2["karakteristikker"] = "|".join(o2["karakteristikker"])
+        for field in category_fields:
+            if field["mode"] == "list":
+                values = o2.get(field["key"])
+                if isinstance(values, list):
+                    o2[field["key"]] = "|".join(values)
+        writer.writerow({k: o2.get(k, "") for k in fieldnames})
+        export_rows_for_table.append({k: o2.get(k, "") for k in fieldnames})
+    csv_bytes = csv_buf.getvalue().encode("utf-8")
+    excel_bytes, excel_export_error = build_excel_bytes(export_rows_for_table, fieldnames)
+    return jsonl_bytes, csv_bytes, excel_bytes, excel_export_error
+
+
+def render_results_panel(
+    rows: List[Dict[str, Any]],
+    category_fields: List[Dict[str, Any]],
+    geo_fields_active: List[Dict[str, Any]],
+    source_headers: List[str],
+    run_mode: str | None = None,
+    run_id: str | None = None,
+    checkpoint_path: Path | None = None,
+):
+    from collections import Counter
+
+    if not rows:
+        st.warning("Ingen rader å vise.")
+        return
+
+    if not category_fields:
+        st.warning("Ingen kategorifelter definert – oppdater oppsettet over.")
+    else:
+        for cat in category_fields:
+            values_for_counts: List[str] = []
+            empty_label = "(tom)"
+            if cat["mode"] == "list":
+                empty_label = "(tom liste)"
+                for r in rows:
+                    cell = r.get(cat["key"])
+                    if isinstance(cell, list) and cell:
+                        for val in cell:
+                            text = str(val).strip()
+                            values_for_counts.append(text or empty_label)
+                    else:
+                        values_for_counts.append(empty_label)
+            else:
+                for r in rows:
+                    text = normalize_single_value(r.get(cat["key"], ""))
+                    values_for_counts.append(text or empty_label)
+
+            counts = Counter(values_for_counts)
+            st.markdown(f"**Fordeling for {cat['label']}**")
+            st.table({"verdi": list(counts.keys()), "antall": list(counts.values())})
+            if counts and pd is not None:
+                dfc = pd.DataFrame({"verdi": list(counts.keys()), "antall": list(counts.values())})
+                st.bar_chart(dfc.set_index("verdi"))
+
+    ts = _ts()
+    jsonl_bytes, csv_bytes, excel_bytes, excel_export_error = build_export_payloads(
+        rows=rows,
+        category_fields=category_fields,
+        geo_fields_active=geo_fields_active,
+        source_headers=source_headers,
+    )
+    checkpoint_jsonl_bytes = checkpoint_path.read_bytes() if checkpoint_path and checkpoint_path.exists() else b""
+    if run_id:
+        st.caption(f"Checkpoint-id: {run_id}")
+    if run_mode == "sample":
+        st.info("Dette var et sample – bruk «Kjør alt» for å prosessere alle rader.")
+
+    download_cols = st.columns(4)
+    with download_cols[0]:
+        st.download_button(
+            "Last ned JSONL",
+            data=jsonl_bytes,
+            file_name=f"luminoner_{ts}.jsonl",
+            mime="application/jsonl",
+        )
+    with download_cols[1]:
+        st.download_button(
+            "Last ned CSV",
+            data=csv_bytes,
+            file_name=f"luminoner_{ts}.csv",
+            mime="text/csv",
+        )
+    with download_cols[2]:
+        if excel_bytes:
+            st.download_button(
+                "Last ned Excel",
+                data=excel_bytes,
+                file_name=f"luminoner_{ts}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            st.caption(
+                f"Excel-eksport er ikke tilgjengelig i dette miljøet: {excel_export_error or 'ukjent feil'}"
+            )
+    with download_cols[3]:
+        if checkpoint_jsonl_bytes:
+            st.download_button(
+                "Last ned checkpoint (JSONL)",
+                data=checkpoint_jsonl_bytes,
+                file_name=f"{run_id or 'checkpoint'}.jsonl",
+                mime="application/jsonl",
+            )
 
 
 # ---------- Data inn ----------
@@ -809,8 +969,8 @@ else:
 st.session_state["last_source_headers"] = current_source_headers
 
 render_section_subtitle("Fragmentkolonne og target-markering")
-fragment_marker_cols = st.columns([2.5, 1, 1])
-with fragment_marker_cols[0]:
+fragment_cols = st.columns([2.5, 1, 1])
+with fragment_cols[0]:
     if pending_table_headers:
         st.caption("Kolonnevalg fylles automatisk fra opplastet fil.")
         selected_fragment_column = st.selectbox(
@@ -826,14 +986,14 @@ with fragment_marker_cols[0]:
             value="Last opp CSV/TSV/Excel for å velge kolonne",
             disabled=True,
         )
-with fragment_marker_cols[1]:
+with fragment_cols[1]:
     target_marker_left_raw = st.text_input(
         "Startmarkør",
         key="target_marker_left_input",
         help="Tegnene rett før målfragmentet (f.eks. <b>).",
         max_chars=20,
     )
-with fragment_marker_cols[2]:
+with fragment_cols[2]:
     target_marker_right_raw = st.text_input(
         "Sluttmarkør",
         key="target_marker_right_input",
@@ -1034,51 +1194,16 @@ with run_groups[1]:
             disabled=sample_disabled,
         )
 
-entries_signature = compute_entries_signature(input_entries) if input_entries else ""
-prompt_signature = compute_prompt_signature(prompt)
-resume_candidates: List[Dict[str, Any]] = []
-if entries_count:
-    for meta in list_recent_run_metas():
-        if meta.get("status") == "completed":
-            continue
-        if meta.get("run_mode") != "all":
-            continue
-        if meta.get("entries_signature") != entries_signature:
-            continue
-        if meta.get("prompt_signature") != prompt_signature:
-            continue
-        if meta.get("model") != MODEL:
-            continue
-        resume_candidates.append(meta)
-
-resume_run_id: str | None = None
-if resume_candidates:
-    with st.container(border=True):
-        st.markdown("**Gjenoppta avbrutt kjøring**")
-        resume_labels = []
-        for item in resume_candidates:
-            processed = int(item.get("processed_records", 0))
-            total_records = int(item.get("total_records", 0))
-            rid = str(item.get("run_id", "ukjent"))
-            updated = str(item.get("updated_at", ""))
-            resume_labels.append(f"{rid} ({processed}/{total_records}) – sist oppdatert {updated}")
-        selected_resume_label = st.selectbox(
-            "Tilgjengelige avbrutte kjøringer",
-            options=resume_labels,
-            key="resume_run_label_select",
-        )
-        selected_index = resume_labels.index(selected_resume_label)
-        selected_resume_id = str(resume_candidates[selected_index].get("run_id"))
-        use_resume = st.checkbox(
-            "Bruk denne når du trykker «Kjør alt»",
-            value=False,
-            key="resume_run_use_toggle",
-        )
-        if use_resume:
-            resume_run_id = selected_resume_id
-            st.caption("Full kjøring vil fortsette fra valgt checkpoint.")
-        else:
-            st.caption("Full kjøring starter på nytt (du kan slå på gjenoppta når som helst).")
+request_stop_after_batch = st.button(
+    "Avslutt og vis data så langt",
+    use_container_width=True,
+    disabled=sample_disabled,
+    help="Kjøringen stopper kontrollert etter neste ferdige batch, og du kan analysere resultatene så langt.",
+)
+if request_stop_after_batch:
+    st.session_state["stop_after_batch_requested"] = True
+if st.session_state.get("stop_after_batch_requested"):
+    st.info("Avslutning er planlagt: kjøringen stopper etter neste batch.")
 
 entries_to_process: List[Dict[str, Any]] | None = None
 run_mode = None
@@ -1172,27 +1297,11 @@ if to_run_entries:
     recs = build_records(to_run_entries)
     total = len(recs)
 
-    selected_resume_id = resume_run_id if run_mode == "all" else None
-    is_resume = bool(selected_resume_id)
-    if is_resume and selected_resume_id:
-        run_id = selected_resume_id
-    else:
-        run_id = make_run_id(run_mode or "run")
+    run_id = make_run_id(run_mode or "run")
     run_jsonl_path, run_meta_path = run_paths(run_id)
-
-    if is_resume:
-        all_rows = load_jsonl_rows(run_jsonl_path)
-        st.info(f"Gjenopptar avbrutt kjøring: {run_id}")
-    else:
-        run_jsonl_path.write_text("", encoding="utf-8")
-
-    processed_ids = {
-        int(row.get(META_RECORD_ID_KEY))
-        for row in all_rows
-        if str(row.get(META_RECORD_ID_KEY, "")).isdigit()
-    }
-    pending_recs = [rec for rec in recs if rec["id"] not in processed_ids]
-    done = len(processed_ids)
+    run_jsonl_path.write_text("", encoding="utf-8")
+    pending_recs = recs
+    done = 0
 
     run_meta: Dict[str, Any] = {
         "run_id": run_id,
@@ -1205,11 +1314,11 @@ if to_run_entries:
         "batch_size": int(BATCH_SIZE),
         "total_records": total,
         "processed_records": done,
-        "entries_signature": entries_signature,
-        "prompt_signature": prompt_signature,
         "jsonl_path": str(run_jsonl_path),
     }
     save_run_meta(run_meta_path, run_meta)
+    stop_after_first_batch = bool(st.session_state.get("stop_after_batch_requested"))
+    stopped_early = False
 
     progress = st.progress(0.0)
     status = st.empty()
@@ -1319,155 +1428,37 @@ if to_run_entries:
         run_meta["processed_records"] = done
         run_meta["updated_at"] = _ts_now()
         save_run_meta(run_meta_path, run_meta)
+        if stop_after_first_batch:
+            stopped_early = True
+            run_meta["status"] = "stopped"
+            run_meta["stop_reason"] = "requested_via_button"
+            run_meta["updated_at"] = _ts_now()
+            save_run_meta(run_meta_path, run_meta)
+            break
 
-    run_meta["status"] = "completed"
+    if stop_after_first_batch:
+        st.session_state["stop_after_batch_requested"] = False
+
+    run_meta["status"] = "stopped" if stopped_early else "completed"
     run_meta["processed_records"] = done
     run_meta["updated_at"] = _ts_now()
     save_run_meta(run_meta_path, run_meta)
-    status.write(f"Ferdig: {done}/{total} (checkpoint: {run_id})")
-
-    if all_rows:
-        def _row_sort_key(row: Dict[str, Any]):
-            idx = row.get(META_ROW_INDEX_KEY)
-            if idx is None:
-                idx = row.get(META_RECORD_ID_KEY, 0)
-            return (idx, row.get(META_RECORD_ID_KEY, 0))
-
-        all_rows.sort(key=_row_sort_key)
-        for row in all_rows:
-            row.pop(META_ROW_INDEX_KEY, None)
-            row.pop(META_RECORD_ID_KEY, None)
-
-    if not all_rows:
-        st.warning("Ingen rader å vise.")
+    if stopped_early:
+        status.write(f"Stoppet tidlig: {done}/{total} (checkpoint: {run_id})")
     else:
-        from collections import Counter
+        status.write(f"Ferdig: {done}/{total} (checkpoint: {run_id})")
 
-        if not category_fields:
-            st.warning("Ingen kategorifelter definert – oppdater oppsettet over.")
-        else:
-            for cat in category_fields:
-                values_for_counts: List[str] = []
-                empty_label = "(tom)"
-                if cat["mode"] == "list":
-                    empty_label = "(tom liste)"
-                    for r in all_rows:
-                        cell = r.get(cat["key"])
-                        if isinstance(cell, list) and cell:
-                            for val in cell:
-                                text = str(val).strip()
-                                values_for_counts.append(text or empty_label)
-                        else:
-                            values_for_counts.append(empty_label)
-                else:
-                    for r in all_rows:
-                        text = normalize_single_value(r.get(cat["key"], ""))
-                        values_for_counts.append(text or empty_label)
-
-                counts = Counter(values_for_counts)
-                st.markdown(f"**Fordeling for {cat['label']}**")
-                st.table({"verdi": list(counts.keys()), "antall": list(counts.values())})
-                if counts and pd is not None:
-                    dfc = pd.DataFrame(
-                        {"verdi": list(counts.keys()), "antall": list(counts.values())}
-                    )
-                    st.bar_chart(dfc.set_index("verdi"))
-
-        ts = _ts()
-
-        # JSONL
-        jsonl_buf = io.StringIO()
-        for obj in all_rows:
-            jsonl_buf.write(json.dumps(obj, ensure_ascii=False) + "\n")
-        jsonl_bytes = jsonl_buf.getvalue().encode("utf-8")
-
-        # CSV
-        csv_buf = io.StringIO()
-        ordered_keys: List[str] = []
-        for o in all_rows:
-            for k in o.keys():
-                if k not in ordered_keys:
-                    ordered_keys.append(k)
-        geo_field_keys = [g["key"] for g in geo_fields_active]
-        analysis_order = (
-            [c["key"] for c in category_fields]
-            + geo_field_keys
-            + [
-                "karakteristikker",
-                "begrunnelse",
-            ]
-        )
-        source_headers = st.session_state.get("last_source_headers", []) or []
-        source_keys = [k for k in source_headers if k in ordered_keys]
-        fieldnames: List[str] = []
-
-        def _extend(keys: List[str]):
-            for key in keys:
-                if not key:
-                    continue
-                if key not in fieldnames:
-                    fieldnames.append(key)
-
-        _extend(analysis_order)
-        _extend(source_keys)
-        remaining = [k for k in ordered_keys if k not in fieldnames]
-        _extend(remaining)
-        writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
-        writer.writeheader()
-        export_rows_for_table: List[Dict[str, Any]] = []
-        for o in all_rows:
-            o2 = {k: o.get(k, "") for k in fieldnames}
-            if isinstance(o2.get("karakteristikker"), list):
-                o2["karakteristikker"] = "|".join(o2["karakteristikker"])
-            for field in category_fields:
-                if field["mode"] == "list":
-                    values = o2.get(field["key"])
-                    if isinstance(values, list):
-                        o2[field["key"]] = "|".join(values)
-            writer.writerow({k: o2.get(k, "") for k in fieldnames})
-            export_rows_for_table.append({k: o2.get(k, "") for k in fieldnames})
-        csv_bytes = csv_buf.getvalue().encode("utf-8")
-        excel_bytes, excel_export_error = build_excel_bytes(
-            export_rows_for_table, fieldnames
-        )
-
+    cleaned_rows = clean_output_rows(all_rows)
+    if stopped_early:
+        st.warning("Kjøring stoppet tidlig. Du kan analysere resultatene så langt eller gjenoppta senere.")
+    else:
         st.success("Kjøring ferdig ✅")
-        if run_mode == "sample":
-            st.info("Dette var et sample – bruk «Kjør alt» for å prosessere alle rader.")
-        checkpoint_jsonl_bytes = run_jsonl_path.read_bytes() if run_jsonl_path.exists() else b""
-        st.caption(f"Checkpoint-id: {run_id}")
-        download_cols = st.columns(4)
-        with download_cols[0]:
-            st.download_button(
-                "Last ned JSONL",
-                data=jsonl_bytes,
-                file_name=f"luminoner_{ts}.jsonl",
-                mime="application/jsonl",
-            )
-        with download_cols[1]:
-            st.download_button(
-                "Last ned CSV",
-                data=csv_bytes,
-                file_name=f"luminoner_{ts}.csv",
-                mime="text/csv",
-            )
-        with download_cols[2]:
-            if excel_bytes:
-                st.download_button(
-                    "Last ned Excel",
-                    data=excel_bytes,
-                    file_name=f"luminoner_{ts}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            else:
-                st.caption(
-                    f"Excel-eksport er ikke tilgjengelig i dette miljøet: {excel_export_error or 'ukjent feil'}"
-                )
-        with download_cols[3]:
-            if checkpoint_jsonl_bytes:
-                st.download_button(
-                    "Last ned checkpoint (JSONL)",
-                    data=checkpoint_jsonl_bytes,
-                    file_name=f"{run_id}.jsonl",
-                    mime="application/jsonl",
-                )
+    render_results_panel(
+        rows=cleaned_rows,
+        category_fields=category_fields,
+        geo_fields_active=geo_fields_active,
+        source_headers=st.session_state.get("last_source_headers", []) or [],
+        run_mode=run_mode,
+        run_id=run_id,
+        checkpoint_path=run_jsonl_path,
+    )
