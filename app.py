@@ -5,6 +5,11 @@ import streamlit as st
 from openai import OpenAI
 import os
 
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+
 st.set_page_config(page_title="Luminoner / emitoner", layout="wide")
 
 
@@ -23,13 +28,40 @@ INITIAL_CATEGORY_FIELDS = [
         "id": 0,
         "label": "kategori",
         "values": "bokstavelig, metaforisk",
-        "mode": "unique",
+        "mode": "list",
+        "prompt_note": "",
+        "prompt_support_labels": [],
     },
 ]
 
 META_ROW_INDEX_KEY = "__luminoner_input_index"
 META_RECORD_ID_KEY = "__luminoner_internal_id"
 CATEGORY_MODE_LABELS = {"unique": "Unik", "list": "Liste"}
+PROMPT_SUPPORT_OPTIONS = [
+    {
+        "label": "Fokuser på betydning",
+        "text": "Vurder semantisk betydning i konteksten, ikke bare ordform.",
+    },
+    {
+        "label": "Vær konservativ",
+        "text": "Ved tvil: velg den mest konservative koden og unngå overtolkning.",
+    },
+    {
+        "label": "Ekskluder temaord",
+        "text": "Ikke bruk rene temaord hvis de ikke beskriver målordets funksjon.",
+    },
+    {
+        "label": "Skille bokstavelig/metaforisk",
+        "text": "Skille tydelig mellom bokstavelig og metaforisk bruk.",
+    },
+    {
+        "label": "Bruk kontekst før/etter",
+        "text": "Bruk både venstre og høyre kontekst aktivt når koden velges.",
+    },
+]
+PROMPT_SUPPORT_TEXT_BY_LABEL = {
+    option["label"]: option["text"] for option in PROMPT_SUPPORT_OPTIONS
+}
 DEFAULT_TARGET_MARKER_LEFT = "<b>"
 DEFAULT_TARGET_MARKER_RIGHT = "</b>"
 GEO_FIELD_OPTIONS = [
@@ -104,6 +136,40 @@ gate()
 
 st.title("Luminoner – batchannotering")
 
+st.markdown(
+    """
+    <style>
+    .lum-section-title {
+        margin: 1.2rem 0 0.35rem 0;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.5rem;
+        background: #eef4ff;
+        border-left: 0.35rem solid #4c6ef5;
+        font-size: 1.18rem;
+        font-weight: 700;
+        color: #1f2a44;
+    }
+    .lum-section-subtitle {
+        margin: 0.8rem 0 0.25rem 0;
+        font-size: 1.02rem;
+        font-weight: 650;
+        color: #324b85;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+def render_section_title(text: str):
+    st.markdown(f'<div class="lum-section-title">{text}</div>', unsafe_allow_html=True)
+
+
+def render_section_subtitle(text: str):
+    st.markdown(
+        f'<div class="lum-section-subtitle">{text}</div>', unsafe_allow_html=True
+    )
+
 # ---------- Konfig ----------
 API_KEY = secret_or_env("OPENAI_API_KEY")
 if not API_KEY:
@@ -111,22 +177,19 @@ if not API_KEY:
     st.stop()
 client = OpenAI(api_key=API_KEY)
 
-colA, colB, colC, colD = st.columns([1.2, 1, 1, 1])
-with colA:
-    MODEL = st.selectbox(
-        "Modell",
-        ["gpt-4o-mini", "gpt-5-mini", "gpt-4"],
-        index=1,
-        help="gpt-4 er dyrere – bruk den kun på små tester."
-    )
-with colB:
-    BATCH_SIZE = st.number_input("Batch-størrelse", 10, 500, 10, 10)
-with colC:
-    TEMP = st.slider("Temperature", 0.0, 1.0, 1.0, 0.1)
-with colD:
-    MAX_WORDS = st.number_input("Maks ord per linje", 5, 60, 25, 1)
+if "model_select" not in st.session_state:
+    st.session_state["model_select"] = "gpt-5-mini"
+if "batch_size_input" not in st.session_state:
+    st.session_state["batch_size_input"] = 10
+if "temp_input" not in st.session_state:
+    st.session_state["temp_input"] = 1.0
 
-st.subheader("Kategorioppsett (kolonner)")
+MODEL = str(st.session_state.get("model_select", "gpt-5-mini"))
+BATCH_SIZE = int(st.session_state.get("batch_size_input", 10))
+TEMP = float(st.session_state.get("temp_input", 1.0))
+
+render_section_title("Annotering og promptkonstruksjon")
+st.markdown("**Kategorioppsett (kolonner)**")
 st.caption(
     "Del opp annoteringen i flere felter (f.eks. «sport», «økonomi», «konflikt»). "
     "Hvert felt får et eget sett med lovlige verdier."
@@ -134,6 +197,12 @@ st.caption(
 st.caption(
     f"Verdien «{CATCH_ALL_VALUE}» legges automatisk til alle felter som en catch-all for "
     "fragmenter uten treff."
+)
+st.caption(
+    "Legg gjerne inn «Prompt-utvidelse» per felt for ekstra tolkningsregler. Feltet kan stå tomt."
+)
+st.caption(
+    "Du kan også velge ferdige prompt-støtter per felt for å gjøre oppsettet raskere."
 )
 
 if "category_field_entries" not in st.session_state:
@@ -153,52 +222,66 @@ for option in GEO_FIELD_OPTIONS:
     if state_key not in st.session_state:
         st.session_state[state_key] = option.get("default", False)
 
-action_cols = st.columns([0.25, 0.75])
-with action_cols[0]:
-    if st.button("➕ Legg til felt", use_container_width=True):
-        next_id = st.session_state.get("category_field_counter", len(entries))
-        entries.append({"id": next_id, "label": "", "values": "", "mode": "unique"})
-        st.session_state["category_field_counter"] = next_id + 1
-with action_cols[1]:
-    st.caption("Bruk «Fjern» for å ta bort et felt (minst ett felt må eksistere).")
-
 category_fields: List[Dict[str, Any]] = []
 used_keys = set()
 for idx, entry in enumerate(entries):
-    col_label, col_values, col_mode, col_remove = st.columns([1, 2, 0.8, 0.25])
-    label_val = col_label.text_input(
-        "Feltnavn",
-        value=entry.get("label", ""),
-        placeholder="f.eks. Sport",
-        key=f"category_field_label_{entry['id']}",
-    ).strip()
-    values_val = col_values.text_area(
-        "Tillatte verdier (kommaseparert)",
-        value=entry.get("values", ""),
-        placeholder="fotball, svømming",
-        help="Separér alternativene med komma eller linjeskift.",
-        height=80,
-        key=f"category_field_values_{entry['id']}",
-    )
-    mode_default = entry.get("mode", "unique")
-    mode_val = col_mode.radio(
-        "Variant",
-        options=["unique", "list"],
-        index=0 if mode_default != "list" else 1,
-        format_func=lambda opt: CATEGORY_MODE_LABELS.get(opt, opt),
-        key=f"category_field_mode_{entry['id']}",
-        horizontal=True,
-        help="Unik = én verdi. Liste = 0–3 verdier fra samme vokabular.",
-    )
-    entry["mode"] = mode_val
-    if col_remove.button(
-        "Fjern",
-        key=f"remove_category_field_{entry['id']}",
-        use_container_width=True,
-        disabled=len(entries) == 1,
-    ):
-        del entries[idx]
-        st.rerun()
+    with st.container(border=True):
+        st.caption(f"Feltgruppe {idx + 1}")
+        col_label, col_values, col_mode, col_remove = st.columns([1, 2, 0.8, 0.25])
+        label_val = col_label.text_input(
+            "Feltnavn",
+            value=entry.get("label", ""),
+            placeholder="f.eks. Sport",
+            key=f"category_field_label_{entry['id']}",
+        ).strip()
+        values_val = col_values.text_area(
+            "Tillatte verdier (kommaseparert)",
+            value=entry.get("values", ""),
+            placeholder="fotball, svømming",
+            help="Separér alternativene med komma eller linjeskift.",
+            height=80,
+            key=f"category_field_values_{entry['id']}",
+        )
+        mode_default = entry.get("mode", "list")
+        mode_val = col_mode.radio(
+            "Variant",
+            options=["unique", "list"],
+            index=0 if mode_default == "unique" else 1,
+            format_func=lambda opt: CATEGORY_MODE_LABELS.get(opt, opt),
+            key=f"category_field_mode_{entry['id']}",
+            horizontal=True,
+            help="Unik = én verdi. Liste = 0–3 verdier fra samme vokabular.",
+        )
+        entry["mode"] = mode_val
+        if col_remove.button(
+            "Fjern",
+            key=f"remove_category_field_{entry['id']}",
+            use_container_width=True,
+            disabled=len(entries) == 1,
+        ):
+            del entries[idx]
+            st.rerun()
+        prompt_note_val = st.text_input(
+            "Prompt-utvidelse (valgfritt)",
+            value=entry.get("prompt_note", ""),
+            placeholder='f.eks. "Bruk bare ideologiske merkelapper, ikke temaord."',
+            key=f"category_field_prompt_note_{entry['id']}",
+            help="Ekstra instruks for dette feltet. Brukes direkte i den genererte prompten.",
+        ).strip()
+        entry["prompt_note"] = prompt_note_val
+        support_default = [
+            label
+            for label in entry.get("prompt_support_labels", [])
+            if label in PROMPT_SUPPORT_TEXT_BY_LABEL
+        ]
+        prompt_support_labels = st.multiselect(
+            "Prompt-støtte (hurtigvalg)",
+            options=list(PROMPT_SUPPORT_TEXT_BY_LABEL.keys()),
+            default=support_default,
+            key=f"category_field_prompt_support_{entry['id']}",
+            help="Velg én eller flere ferdige føringer som legges til dette feltet.",
+        )
+        entry["prompt_support_labels"] = prompt_support_labels
 
     display_label = label_val or f"Felt {idx + 1}"
     field_key = display_label
@@ -215,6 +298,19 @@ for idx, entry in enumerate(entries):
     field_values = [t for t in tokens if t]
     if CATCH_ALL_VALUE not in field_values:
         field_values.append(CATCH_ALL_VALUE)
+    support_texts = [
+        PROMPT_SUPPORT_TEXT_BY_LABEL[label]
+        for label in prompt_support_labels
+        if label in PROMPT_SUPPORT_TEXT_BY_LABEL
+    ]
+    combined_prompt_note = prompt_note_val
+    if support_texts:
+        support_block = " ".join(support_texts)
+        combined_prompt_note = (
+            f"{prompt_note_val} {support_block}".strip()
+            if prompt_note_val
+            else support_block
+        )
 
     category_fields.append(
         {
@@ -222,8 +318,28 @@ for idx, entry in enumerate(entries):
             "key": field_key,
             "values": field_values,
             "mode": mode_val,
+            "prompt_note": combined_prompt_note,
         }
     )
+
+action_cols = st.columns([0.25, 0.75])
+with action_cols[0]:
+    if st.button("➕ Legg til felt", use_container_width=True):
+        next_id = st.session_state.get("category_field_counter", len(entries))
+        entries.append(
+            {
+                "id": next_id,
+                "label": "",
+                "values": "",
+                "mode": "list",
+                "prompt_note": "",
+                "prompt_support_labels": [],
+            }
+        )
+        st.session_state["category_field_counter"] = next_id + 1
+        st.rerun()
+with action_cols[1]:
+    st.caption("Bruk «Fjern» for å ta bort et felt (minst ett felt må eksistere).")
 
 
 st.subheader("Geotagging (valgfritt)")
@@ -318,25 +434,89 @@ json_field_lines = "\n".join(json_field_line_parts)
 if not json_field_lines:
     json_field_lines = '    "kategori": <én av "kategori1", "kategori2">,'  # fallback
 
+
+def build_excel_bytes(
+    rows: List[Dict[str, Any]], columns: List[str]
+) -> tuple[bytes | None, str | None]:
+    """
+    Bygger .xlsx-innhold fra rader/kolonner.
+    Returnerer (bytes, None) ved suksess, ellers (None, feilmelding).
+    """
+    if pd is None:
+        return None, "pandas er ikke tilgjengelig i miljøet."
+    try:
+        excel_io = io.BytesIO()
+        pd.DataFrame(rows, columns=columns).to_excel(excel_io, index=False)
+        return excel_io.getvalue(), None
+    except Exception as e:
+        return None, str(e)
+
+
 # ---------- Data inn ----------
-st.subheader("1) Data inn")
-src = st.radio("Kilde", ["Lim inn", "Last opp CSV/TSV"], horizontal=True)
+render_section_title("Data inn – konkordanser og merking")
+st.caption(
+    "Legg inn data som fritekst, CSV/TSV eller Excel. "
+    "Velg deretter fragmentkolonne og target-markører."
+)
+src = st.radio("Kilde", ["Lim inn", "Last opp CSV/TSV/Excel"], horizontal=True)
+
+example_rows = [
+    {
+        "concordance": "A <b>klima</b> B",
+        "doc_id": "eksempel-1",
+        "note": "Bytt ut med egne fragmenter",
+    },
+    {
+        "concordance": "A <b>migrasjon</b> B",
+        "doc_id": "eksempel-2",
+        "note": "Første rad er header",
+    },
+]
+example_csv_buf = io.StringIO()
+example_writer = csv.DictWriter(
+    example_csv_buf, fieldnames=["concordance", "doc_id", "note"]
+)
+example_writer.writeheader()
+example_writer.writerows(example_rows)
+example_csv_bytes = example_csv_buf.getvalue().encode("utf-8")
+
+example_xlsx_bytes, example_xlsx_error = build_excel_bytes(
+    example_rows, ["concordance", "doc_id", "note"]
+)
+
+with st.expander("Eksempelfiler for opplasting", expanded=False):
+    st.caption("Last ned en liten malfil og bruk den som utgangspunkt.")
+    sample_cols = st.columns(2)
+    with sample_cols[0]:
+        st.download_button(
+            "Last ned eksempel (CSV)",
+            data=example_csv_bytes,
+            file_name="luminoner_eksempel.csv",
+            mime="text/csv",
+        )
+    with sample_cols[1]:
+        if example_xlsx_bytes:
+            st.download_button(
+                "Last ned eksempel (Excel)",
+                data=example_xlsx_bytes,
+                file_name="luminoner_eksempel.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            st.caption(
+                f"Excel-eksempel er ikke tilgjengelig i miljøet: {example_xlsx_error or 'ukjent feil'}"
+            )
 
 
-def clamp_fragment(text: str, max_words: int) -> str:
+def clamp_fragment(text: str) -> str:
     text = (text or "").strip()
-    if not text:
-        return ""
-    words = text.split()
-    if len(words) > max_words:
-        return " ".join(words[:max_words])
     return text
 
 
-def normalize_lines(lines: List[str], max_words: int) -> List[str]:
+def normalize_lines(lines: List[str]) -> List[str]:
     out = []
     for ln in lines:
-        cleaned = clamp_fragment(ln, max_words)
+        cleaned = clamp_fragment(ln)
         if not cleaned:
             continue
         out.append(cleaned)
@@ -412,6 +592,10 @@ def normalize_single_value(value: Any) -> str:
     return str(value).strip()
 
 
+def build_index_headers(column_count: int) -> List[str]:
+    return [f"kol_{i + 1}" for i in range(max(0, column_count))]
+
+
 input_entries: List[Dict[str, Any]] = []
 selected_fragment_column: str | None = None
 current_source_headers: List[str] = []
@@ -426,7 +610,7 @@ if src == "Lim inn":
         placeholder="fragment 1\nfragment 2\n.",
     )
     if txt:
-        normalized = normalize_lines(txt.splitlines(), MAX_WORDS)
+        normalized = normalize_lines(txt.splitlines())
         if normalized:
             current_source_headers = ["fragment"]
         for idx, frag in enumerate(normalized):
@@ -438,21 +622,29 @@ if src == "Lim inn":
                 }
             )
 else:
+    table_has_header = st.checkbox(
+        "Første rad i CSV/TSV/Excel er header",
+        value=True,
+        key="table_has_header",
+        help=(
+            "Skru av hvis filen mangler header-rad. Da opprettes kolonner som kol_1, kol_2, ..."
+        ),
+    )
     up = st.file_uploader(
-        "Last opp .txt/.csv/.tsv (én forekomst per linje eller kolonne)",
-        type=["txt", "csv", "tsv"],
+        "Last opp .txt/.csv/.tsv/.xlsx (én forekomst per linje eller kolonne)",
+        type=["txt", "csv", "tsv", "xlsx"],
     )
     if up:
         file_bytes = up.getvalue()
         name_lower = up.name.lower()
         is_tsv = name_lower.endswith(".tsv") or name_lower.endswith(".tab")
         is_csv = name_lower.endswith(".csv")
-        is_table_file = is_csv or is_tsv
+        is_xlsx = name_lower.endswith(".xlsx")
+        is_table_file = is_csv or is_tsv or is_xlsx
 
         if not is_table_file:
             normalized = normalize_lines(
-                file_bytes.decode("utf-8", errors="ignore").splitlines(),
-                MAX_WORDS,
+                file_bytes.decode("utf-8", errors="ignore").splitlines()
             )
             if normalized:
                 current_source_headers = ["fragment"]
@@ -465,14 +657,46 @@ else:
                     }
                 )
         else:
-            csv_text = file_bytes.decode("utf-8", errors="ignore")
-            delimiter = "\t" if is_tsv else detect_delimiter(csv_text, ",")
-            reader = csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
-            rows = list(reader)
-            headers = reader.fieldnames or []
+            if is_xlsx:
+                try:
+                    if pd is None:
+                        raise RuntimeError("pandas er ikke tilgjengelig i miljøet.")
+                    excel_header = 0 if table_has_header else None
+                    df = pd.read_excel(
+                        io.BytesIO(file_bytes), dtype=str, header=excel_header
+                    ).fillna("")
+                    if not table_has_header:
+                        df.columns = build_index_headers(len(df.columns))
+                    rows = df.to_dict(orient="records")
+                    headers = [str(c) for c in df.columns.tolist()]
+                except Exception as e:
+                    st.error(f"Kunne ikke lese Excel-filen: {e}")
+                    rows = []
+                    headers = []
+            else:
+                csv_text = file_bytes.decode("utf-8", errors="ignore")
+                delimiter = "\t" if is_tsv else detect_delimiter(csv_text, ",")
+                if table_has_header:
+                    reader = csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+                    rows = list(reader)
+                    headers = reader.fieldnames or []
+                else:
+                    reader = csv.reader(io.StringIO(csv_text), delimiter=delimiter)
+                    raw_rows = list(reader)
+                    max_cols = max((len(r) for r in raw_rows), default=0)
+                    headers = build_index_headers(max_cols)
+                    rows = []
+                    for raw in raw_rows:
+                        row_obj = {
+                            h: (raw[i] if i < len(raw) else "")
+                            for i, h in enumerate(headers)
+                        }
+                        rows.append(row_obj)
 
             if not headers:
-                st.error("Fant ingen kolonner i filen. Sjekk at CSV/TSV har header-rad.")
+                st.error(
+                    "Fant ingen kolonner i filen. Sjekk filformatet eller prøv uten header-rad."
+                )
             else:
                 current_source_headers = headers
                 pending_table_headers = headers
@@ -486,12 +710,13 @@ else:
 
 st.session_state["last_source_headers"] = current_source_headers
 
-st.subheader("1b) Fragmentkolonne og target-markering")
+render_section_subtitle("Fragmentkolonne og target-markering")
 fragment_marker_cols = st.columns([2.5, 1, 1])
 with fragment_marker_cols[0]:
     if pending_table_headers:
+        st.caption("Kolonnevalg fylles automatisk fra opplastet fil.")
         selected_fragment_column = st.selectbox(
-            "Kolonne med fragmenter",
+            "Fragmentkolonne (fra fil)",
             options=pending_table_headers,
             index=min(pending_table_default_idx, len(pending_table_headers) - 1),
             key="fragment_column_select",
@@ -499,8 +724,8 @@ with fragment_marker_cols[0]:
         )
     else:
         st.text_input(
-            "Kolonne med fragmenter",
-            value="(gjelder CSV/TSV-filer)",
+            "Fragmentkolonne (fra fil)",
+            value="Last opp CSV/TSV/Excel for å velge kolonne",
             disabled=True,
         )
 with fragment_marker_cols[1]:
@@ -532,7 +757,7 @@ if pending_table_rows and selected_fragment_column:
     for idx, row in enumerate(pending_table_rows):
         row_copy = {h: row.get(h, "") for h in pending_table_headers}
         frag_value = row_copy.get(selected_fragment_column, "")
-        cleaned = clamp_fragment(frag_value, MAX_WORDS)
+        cleaned = clamp_fragment(frag_value)
         input_entries.append(
             {
                 "fragment": cleaned,
@@ -550,15 +775,18 @@ if pending_table_rows and selected_fragment_column:
 if selected_fragment_column:
     st.caption(
         f"Fant {len(input_entries)} rader (kolonne «{selected_fragment_column}»). "
-        f"Originale kolonner beholdes, og fragmenter kuttes til maks {MAX_WORDS} ord for modellkallet."
+        "Originale kolonner beholdes."
     )
 else:
     st.caption(
-        f"Fant {len(input_entries)} fragmenter (dupl/blanke kuttet). Maks {MAX_WORDS} ord per linje."
+        f"Fant {len(input_entries)} fragmenter (dupl/blanke kuttet)."
     )
 
 # ---------- Instruks (system) ----------
-st.subheader("2) Instruks (oppgavebeskrivelse)")
+render_section_subtitle("Generert prompt (fra feltoppsett)")
+st.caption(
+    "Prompten under bygges automatisk fra feltnavn, verdier, felt-kommentarer og tekniske JSON-krav."
+)
 
 geo_prompt_text = ""
 if geo_fields_active:
@@ -575,8 +803,7 @@ Fragmentene har formen A{target_marker_left}X{target_marker_right}B der X (mello
 markørene) er målordet du skal beskrive. Bruk konteksten før/etter som støtte,
 men alle kategorier skal gjelde selve X.
 
-Bruk kategorifeltene {field_names_display} til å fordele én kode per felt (f.eks.
-sport/økonomi/konflikt).
+Bruk kategorifeltene {field_names_display} til å fordele koder per felt.
 
 Hvis ingen kode passer i et felt, bruk verdien "{CATCH_ALL_VALUE}".
 
@@ -584,17 +811,21 @@ Bruk feltet "karakteristikker" til 0–3 korte stikkord som sier noe om fenomene
 du undersøker (f.eks. «personlig», «offentlig», «historisk», «ironisk», osv.).
 
 {geo_prompt_text}
-
-Du kan bruke denne appen til f.eks.:
-- forskjell på fysisk klima vs. debattklima
-- typer personreferanser
-- andre typer luminoner med faste koder per felt.
 """.strip()
 
-user_prompt = st.text_area(
-    "Oppgavebeskrivelse (kan endres for andre luminoner)",
-    value=default_user_prompt,
-    height=200,
+field_prompt_lines: List[str] = []
+for c in category_fields:
+    prompt_note = normalize_single_value(c.get("prompt_note", ""))
+    if prompt_note:
+        field_prompt_lines.append(f'- Ekstra føring for "{c["key"]}": {prompt_note}')
+field_prompt_text = "\n".join(field_prompt_lines)
+if not field_prompt_text:
+    field_prompt_text = "- Ingen ekstra feltkommentarer lagt inn."
+
+TASK_PROMPT = (
+    default_user_prompt
+    + "\n\nEkstra feltkommentarer:\n"
+    + field_prompt_text
 )
 
 TECH_PROMPT = f"""
@@ -624,42 +855,89 @@ with st.expander("Tekniske formatkrav (JSON)", expanded=False):
     st.code(TECH_PROMPT)
 
 # dette er faktiske systemprompt
-prompt = user_prompt.strip() + "\n\n" + TECH_PROMPT
+prompt = TASK_PROMPT.strip() + "\n\n" + TECH_PROMPT
+with st.expander("Forhåndsvis hele prompten (sendes til modellen)", expanded=False):
+    st.code(prompt)
 
 # ---------- Sample og kjøring ----------
-st.subheader("3) Estimat og kjøring")
+render_section_title("Modell og kjøring")
+model_cols = st.columns([1.3, 1, 1])
+model_options = ["gpt-5-mini", "gpt-4o-mini", "gpt-4"]
+model_default = st.session_state.get("model_select", "gpt-5-mini")
+if model_default not in model_options:
+    model_default = "gpt-5-mini"
+with model_cols[0]:
+    MODEL = st.selectbox(
+        "Modell",
+        model_options,
+        index=model_options.index(model_default),
+        key="model_select",
+        help="Anbefalt: gpt-5-mini. gpt-4 er dyrere; gpt-4o-mini kan testes.",
+    )
+with model_cols[1]:
+    BATCH_SIZE = int(
+        st.number_input(
+            "Batch-størrelse",
+            min_value=10,
+            max_value=500,
+            step=10,
+            key="batch_size_input",
+        )
+    )
+with model_cols[2]:
+    TEMP = float(
+        st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=1.0,
+            step=0.1,
+            key="temp_input",
+        )
+    )
+st.caption("Standardoppsett: gpt-5-mini med temperature 1.0.")
+
+render_section_subtitle("Estimat og kjørevalg")
 entries_count = len(input_entries)
 sample_disabled = entries_count == 0
 sample_max_value = entries_count or 1
 sample_default = min(10, sample_max_value)
-sample_cols = st.columns([1, 1])
-with sample_cols[0]:
-    sample_size = st.number_input(
-        "Antall linjer i sample",
-        min_value=1,
-        max_value=sample_max_value,
-        value=sample_default,
-        step=1,
-        disabled=sample_disabled,
-        help="Velg hvor mange rader som brukes når du kjører sample.",
-    )
-with sample_cols[1]:
-    sample_shuffle = st.checkbox(
-        "Tilfeldig sample",
-        value=True,
-        disabled=sample_disabled,
-        help="Når aktivert velges samplet tilfeldig før det sorteres.",
-    )
-
-run_cols = st.columns([1, 1])
-with run_cols[0]:
-    run_all = st.button(
-        "Kjør alt", type="primary", use_container_width=True, disabled=sample_disabled
-    )
-with run_cols[1]:
-    run_sample = st.button(
-        "Kjør sample", use_container_width=True, disabled=sample_disabled
-    )
+st.caption("Velg enten testkjøring (sample) eller full kjøring av alle rader.")
+run_groups = st.columns(2)
+with run_groups[0]:
+    with st.container(border=True):
+        st.markdown("**Testkjøring (sample)**")
+        sample_size = st.number_input(
+            "Antall linjer i sample",
+            min_value=1,
+            max_value=sample_max_value,
+            value=sample_default,
+            step=1,
+            disabled=sample_disabled,
+            help="Velg hvor mange rader som brukes når du kjører sample.",
+        )
+        sample_shuffle = st.checkbox(
+            "Tilfeldig sample",
+            value=True,
+            disabled=sample_disabled,
+            help="Når aktivert velges samplet tilfeldig før det sorteres.",
+        )
+        run_sample = st.button(
+            "Kjør testsample",
+            use_container_width=True,
+            disabled=sample_disabled,
+        )
+with run_groups[1]:
+    with st.container(border=True):
+        st.markdown("**Full kjøring (alle rader)**")
+        st.caption(
+            "Kjør hele datasettet med valgt modell og innstillinger."
+        )
+        run_all = st.button(
+            "Kjør alt",
+            type="primary",
+            use_container_width=True,
+            disabled=sample_disabled,
+        )
 
 entries_to_process: List[Dict[str, Any]] | None = None
 run_mode = None
@@ -868,7 +1146,6 @@ if to_run_entries:
         st.warning("Ingen rader å vise.")
     else:
         from collections import Counter
-        import pandas as pd
 
         if not category_fields:
             st.warning("Ingen kategorifelter definert – oppdater oppsettet over.")
@@ -894,7 +1171,7 @@ if to_run_entries:
                 counts = Counter(values_for_counts)
                 st.markdown(f"**Fordeling for {cat['label']}**")
                 st.table({"verdi": list(counts.keys()), "antall": list(counts.values())})
-                if counts:
+                if counts and pd is not None:
                     dfc = pd.DataFrame(
                         {"verdi": list(counts.keys()), "antall": list(counts.values())}
                     )
@@ -941,6 +1218,7 @@ if to_run_entries:
         _extend(remaining)
         writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
         writer.writeheader()
+        export_rows_for_table: List[Dict[str, Any]] = []
         for o in all_rows:
             o2 = {k: o.get(k, "") for k in fieldnames}
             if isinstance(o2.get("karakteristikker"), list):
@@ -951,20 +1229,39 @@ if to_run_entries:
                     if isinstance(values, list):
                         o2[field["key"]] = "|".join(values)
             writer.writerow({k: o2.get(k, "") for k in fieldnames})
+            export_rows_for_table.append({k: o2.get(k, "") for k in fieldnames})
         csv_bytes = csv_buf.getvalue().encode("utf-8")
+        excel_bytes, excel_export_error = build_excel_bytes(
+            export_rows_for_table, fieldnames
+        )
 
         st.success("Kjøring ferdig ✅")
         if run_mode == "sample":
             st.info("Dette var et sample – bruk «Kjør alt» for å prosessere alle rader.")
-        st.download_button(
-            "Last ned JSONL",
-            data=jsonl_bytes,
-            file_name=f"luminoner_{ts}.jsonl",
-            mime="application/jsonl",
-        )
-        st.download_button(
-            "Last ned CSV",
-            data=csv_bytes,
-            file_name=f"luminoner_{ts}.csv",
-            mime="text/csv",
-        )
+        download_cols = st.columns(3)
+        with download_cols[0]:
+            st.download_button(
+                "Last ned JSONL",
+                data=jsonl_bytes,
+                file_name=f"luminoner_{ts}.jsonl",
+                mime="application/jsonl",
+            )
+        with download_cols[1]:
+            st.download_button(
+                "Last ned CSV",
+                data=csv_bytes,
+                file_name=f"luminoner_{ts}.csv",
+                mime="text/csv",
+            )
+        with download_cols[2]:
+            if excel_bytes:
+                st.download_button(
+                    "Last ned Excel",
+                    data=excel_bytes,
+                    file_name=f"luminoner_{ts}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                st.caption(
+                    f"Excel-eksport er ikke tilgjengelig i dette miljøet: {excel_export_error or 'ukjent feil'}"
+                )
