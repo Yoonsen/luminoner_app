@@ -1,5 +1,6 @@
 # app.py
 import json, io, csv, time, random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any
 import streamlit as st
 from openai import OpenAI
@@ -179,7 +180,7 @@ def suggest_batch_size(total_rows: int, model_name: str) -> int:
         return 10
 
     model_name = (model_name or "").strip().lower()
-    if model_name == "gpt-5-nano":
+    if model_name in {"gpt-5-nano", "gpt-5.4-nano"}:
         base = 30
     elif model_name == "gpt-5-mini":
         base = 20
@@ -208,10 +209,13 @@ if "batch_size_input" not in st.session_state:
     st.session_state["batch_size_input"] = 10
 if "temp_input" not in st.session_state:
     st.session_state["temp_input"] = 1.0
+if "worker_count_input" not in st.session_state:
+    st.session_state["worker_count_input"] = 1
 
 MODEL = str(st.session_state.get("model_select", "gpt-5-mini"))
 BATCH_SIZE = int(st.session_state.get("batch_size_input", 10))
 TEMP = float(st.session_state.get("temp_input", 1.0))
+WORKER_COUNT = int(st.session_state.get("worker_count_input", 1))
 
 render_section_title("Annotering og promptkonstruksjon")
 st.markdown("**Kategorioppsett (kolonner)**")
@@ -1162,7 +1166,7 @@ with st.expander("Forhåndsvis hele prompten (sendes til modellen)", expanded=Fa
 entries_count = len(input_entries)
 render_section_title("Modell og kjøring")
 model_cols = st.columns([1.3, 1, 1])
-model_options = ["gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4"]
+model_options = ["gpt-5-mini", "gpt-5-nano", "gpt-5.4-nano", "gpt-4o-mini", "gpt-4"]
 model_default = st.session_state.get("model_select", "gpt-5-mini")
 if model_default not in model_options:
     model_default = "gpt-5-mini"
@@ -1172,9 +1176,9 @@ with model_cols[0]:
         model_options,
         index=model_options.index(model_default),
         key="model_select",
-        help="Anbefalt: gpt-5-mini eller gpt-5-nano. gpt-4 er dyrere; gpt-4o-mini kan testes.",
+        help="Anbefalt: gpt-5-mini, gpt-5-nano eller gpt-5.4-nano. gpt-4 er dyrere; gpt-4o-mini kan testes.",
     )
-temp_locked_models = {"gpt-5-mini", "gpt-5-nano"}
+temp_locked_models = {"gpt-5-mini", "gpt-5-nano", "gpt-5.4-nano"}
 temperature_locked = MODEL in temp_locked_models
 if temperature_locked:
     st.session_state["temp_input"] = 1.0
@@ -1209,7 +1213,20 @@ if temperature_locked:
     TEMP = 1.0
     st.caption(f"Temperature er låst til 1.0 for {MODEL}.")
 else:
-    st.caption("Anbefalt oppsett for gpt-5-mini/gpt-5-nano: temperature 1.0.")
+    st.caption("Anbefalt oppsett for gpt-5-mini/gpt-5-nano/gpt-5.4-nano: temperature 1.0.")
+WORKER_COUNT = int(
+    st.number_input(
+        "Parallelle workers",
+        min_value=1,
+        max_value=10,
+        step=1,
+        key="worker_count_input",
+        help="Antall samtidige API-kall (batcher). Høyere tall gir raskere kjøring, men større belastning/rate-limit risiko.",
+    )
+)
+st.caption(
+    "Ved «Avslutt og vis data så langt» fullføres batchene som allerede er startet."
+)
 
 render_section_subtitle("Estimat og kjørevalg")
 sample_disabled = entries_count == 0
@@ -1369,6 +1386,7 @@ if to_run_entries:
         "model": MODEL,
         "temperature": TEMP,
         "batch_size": int(BATCH_SIZE),
+        "worker_count": int(WORKER_COUNT),
         "total_records": total,
         "processed_records": done,
         "jsonl_path": str(run_jsonl_path),
@@ -1380,7 +1398,6 @@ if to_run_entries:
     progress = st.progress(0.0)
     status = st.empty()
     progress.progress(done / total if total else 1.0)
-    batch_counter = 0
     record_lookup = {rec["id"]: rec for rec in recs}
 
     def compose_row(
@@ -1397,13 +1414,21 @@ if to_run_entries:
         base["temperature"] = TEMP
         return base
 
-    for batch in chunks(pending_recs, int(BATCH_SIZE)):
-        batch_counter += 1
+    worker_count_effective = max(1, int(WORKER_COUNT))
+    batches = list(chunks(pending_recs, int(BATCH_SIZE)))
+    if stop_after_first_batch:
+        batches = batches[:1]
+
+    def process_batch(
+        batch_number: int, batch: List[Dict[str, Any]]
+    ) -> tuple[int, List[Dict[str, Any]], str | None]:
         user_msg = build_user_msg(batch)
         batch_rows: List[Dict[str, Any]] = []
+        json_error_raw_text: str | None = None
 
         try:
-            r = client.chat.completions.create(
+            local_client = OpenAI(api_key=API_KEY)
+            r = local_client.chat.completions.create(
                 model=MODEL,
                 temperature=TEMP,
                 response_format={"type": "json_object"},
@@ -1417,9 +1442,8 @@ if to_run_entries:
             try:
                 items = parse_items(text)
             except Exception as e_json:
-                with st.expander(f"JSON-feil (batch {batch_counter}) – rå svar"):
-                    st.code(text)
-                raise e_json
+                json_error_raw_text = text
+                raise ValueError(f"JSON-feil: {e_json}") from e_json
 
             frag_map = {r["id"]: r["fragment"] for r in batch}
 
@@ -1443,7 +1467,6 @@ if to_run_entries:
                         )
                 for geo in geo_fields_active:
                     row[geo["key"]] = normalize_single_value(it.get(geo["key"], ""))
-                all_rows.append(row)
                 batch_rows.append(row)
 
             got_ids = {it.get("id") for it in items}
@@ -1459,7 +1482,6 @@ if to_run_entries:
                             row[field["key"]] = "feil"
                     for geo in geo_fields_active:
                         row[geo["key"]] = "feil"
-                    all_rows.append(row)
                     batch_rows.append(row)
 
         except Exception as e:
@@ -1474,24 +1496,56 @@ if to_run_entries:
                         row[field["key"]] = "feil"
                 for geo in geo_fields_active:
                     row[geo["key"]] = "feil"
-                all_rows.append(row)
                 batch_rows.append(row)
 
-        append_jsonl_rows(run_jsonl_path, batch_rows)
+        return batch_number, batch_rows, json_error_raw_text
 
-        done += len(batch)
-        progress.progress(done / total)
-        status.write(f"Ferdig: {done}/{total}")
-        run_meta["processed_records"] = done
-        run_meta["updated_at"] = _ts_now()
-        save_run_meta(run_meta_path, run_meta)
-        if stop_after_first_batch:
-            stopped_early = True
-            run_meta["status"] = "stopped"
-            run_meta["stop_reason"] = "requested_via_button"
+    with ThreadPoolExecutor(max_workers=worker_count_effective) as executor:
+        future_to_batch = {
+            executor.submit(process_batch, i + 1, batch): (i + 1, batch)
+            for i, batch in enumerate(batches)
+        }
+
+        for future in as_completed(future_to_batch):
+            batch_number, batch = future_to_batch[future]
+            try:
+                _, batch_rows, json_error_raw_text = future.result()
+            except Exception as e_future:
+                batch_rows = []
+                json_error_raw_text = None
+                for r in batch:
+                    row = compose_row(r["id"], r["fragment"], record=r)
+                    row["karakteristikker"] = []
+                    row["begrunnelse"] = f"Worker-feil: {e_future}"
+                    for field in category_fields:
+                        if field["mode"] == "list":
+                            row[field["key"]] = ["feil"]
+                        else:
+                            row[field["key"]] = "feil"
+                    for geo in geo_fields_active:
+                        row[geo["key"]] = "feil"
+                    batch_rows.append(row)
+
+            if json_error_raw_text:
+                with st.expander(f"JSON-feil (batch {batch_number}) – rå svar"):
+                    st.code(json_error_raw_text)
+
+            all_rows.extend(batch_rows)
+            append_jsonl_rows(run_jsonl_path, batch_rows)
+
+            done += len(batch)
+            progress.progress(done / total)
+            status.write(f"Ferdig: {done}/{total}")
+            run_meta["processed_records"] = done
             run_meta["updated_at"] = _ts_now()
             save_run_meta(run_meta_path, run_meta)
-            break
+
+    if stop_after_first_batch:
+        stopped_early = True
+        run_meta["status"] = "stopped"
+        run_meta["stop_reason"] = "requested_via_button"
+        run_meta["updated_at"] = _ts_now()
+        save_run_meta(run_meta_path, run_meta)
 
     if stop_after_first_batch:
         st.session_state["stop_after_batch_requested"] = False
