@@ -35,3 +35,4 @@ dist/
 *.tsv
 *.txt
 !example_data/*.*
+runs/
