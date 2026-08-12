@@ -28,6 +28,8 @@ export default function Home() {
   
   // App State
   const [apiKey, setApiKey] = useState('');
+  const [provider, setProvider] = useState('OpenAI');
+  const [model, setModel] = useState('gpt-4o-mini');
   const [targetConcept, setTargetConcept] = useState('');
   const [categories, setCategories] = useState<CategoryField[]>([
     { id: '1', key: 'Sentimentalitet', values: 'Positiv, Negativ, Nøytral' }
@@ -133,6 +135,10 @@ export default function Home() {
             <ConfigPanel 
               apiKey={apiKey} 
               setApiKey={setApiKey} 
+              provider={provider}
+              setProvider={setProvider}
+              model={model}
+              setModel={setModel}
               targetConcept={targetConcept}
               setTargetConcept={setTargetConcept}
               categories={categories}
@@ -152,6 +158,8 @@ export default function Home() {
               dataset={dataset} 
               fileName={fileName} 
               apiKey={apiKey}
+              provider={provider}
+              model={model}
               targetConcept={targetConcept}
               categories={categories}
             />
@@ -178,7 +186,7 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function ConfigPanel({ apiKey, setApiKey, targetConcept, setTargetConcept, categories, setCategories }: any) {
+function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, targetConcept, setTargetConcept, categories, setCategories }: any) {
   
   const addCategory = () => {
     setCategories([...categories, { id: Date.now().toString(), key: 'Ny kategori', values: '' }]);
@@ -272,8 +280,32 @@ function ConfigPanel({ apiKey, setApiKey, targetConcept, setTargetConcept, categ
           Modell & API
         </h3>
         <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Leverandør</label>
+              <select 
+                value={provider} 
+                onChange={(e) => setProvider(e.target.value)}
+                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              >
+                <option value="OpenAI">OpenAI</option>
+                <option value="Anthropic">Anthropic</option>
+                <option value="Google">Google (Gemini)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Modell</label>
+              <input 
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="F.eks gpt-4o-mini"
+                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
+          </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">OpenAI / Anthropic API-nøkkel</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">API-nøkkel for valgt leverandør</label>
             <input 
               type="password" 
               value={apiKey}
@@ -336,7 +368,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData }: any) {
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, targetConcept, categories }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, provider, model, targetConcept, categories }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -372,8 +404,8 @@ function ResultsPanel({ dataset, fileName, apiKey, targetConcept, categories }: 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            provider: 'OpenAI',
-            model: 'gpt-4o-mini',
+            provider,
+            model,
             apiKey,
             systemPrompt,
             prompt
