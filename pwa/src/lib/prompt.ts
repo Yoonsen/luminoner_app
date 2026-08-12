@@ -77,6 +77,11 @@ ${jsonFieldLines}
   return TASK_PROMPT + "\n\n" + TECH_PROMPT;
 }
 
-export function buildUserMessage(batch: any[]): string {
-  return batch.map(r => `${r.id} | ${r.fragment || r.text || r.context || JSON.stringify(r)}`).join("\n");
+export function buildUserMessage(batch: any[], textColumn: string): string {
+  return batch.map(r => {
+    const textContent = textColumn && r[textColumn] 
+      ? r[textColumn] 
+      : (r.fragment || r.text || r.context || r.concordance || r.concordances || JSON.stringify(r));
+    return `${r.id} | ${textContent}`;
+  }).join("\n");
 }

@@ -36,6 +36,19 @@ export default function Home() {
   ]);
   const [dataset, setDataset] = useState<ProcessedRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [textColumn, setTextColumn] = useState<string>('');
+
+  // Auto-detect text column
+  const detectTextColumn = (data: any[]) => {
+    if (!data || data.length === 0) return '';
+    const keys = Object.keys(data[0]);
+    const preferred = ['concordance', 'concordances', 'fragment', 'text', 'context', 'tekst'];
+    for (const pref of preferred) {
+      const match = keys.find(k => k.toLowerCase() === pref);
+      if (match) return match;
+    }
+    return keys[0] || ''; // Fallback to first column
+  };
 
   // File Upload Handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,7 +62,9 @@ export default function Home() {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          setDataset(results.data as ProcessedRow[]);
+          const data = results.data as ProcessedRow[];
+          setDataset(data);
+          setTextColumn(detectTextColumn(data));
           setActiveTab('results'); // Auto-switch to results/preview
         }
       });
@@ -60,8 +75,9 @@ export default function Home() {
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws);
-        setDataset(data as ProcessedRow[]);
+        const data = XLSX.utils.sheet_to_json(ws) as ProcessedRow[];
+        setDataset(data);
+        setTextColumn(detectTextColumn(data));
         setActiveTab('results');
       };
       reader.readAsBinaryString(file);
@@ -74,6 +90,7 @@ export default function Home() {
   const clearData = () => {
     setDataset([]);
     setFileName(null);
+    setTextColumn('');
   };
 
   return (
@@ -145,6 +162,8 @@ export default function Home() {
               dataset={dataset}
               fileName={fileName}
               clearData={clearData}
+              textColumn={textColumn}
+              setTextColumn={setTextColumn}
             />
           </div>
           <div style={{ display: activeTab === 'results' ? 'block' : 'none' }}>
@@ -156,6 +175,7 @@ export default function Home() {
               model={model}
               targetConcept={targetConcept}
               categories={categories}
+              textColumn={textColumn}
             />
           </div>
         </div>
@@ -316,7 +336,9 @@ function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel
   );
 }
 
-function DataPanel({ handleFileUpload, dataset, fileName, clearData }: any) {
+function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn, setTextColumn }: any) {
+  const columns = dataset.length > 0 ? Object.keys(dataset[0]) : [];
+
   return (
     <div className="space-y-6">
       <header className="mb-8">
@@ -339,30 +361,53 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData }: any) {
           />
         </label>
       ) : (
-        <div className="glass-panel rounded-2xl p-6 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600">
-              <FileSpreadsheet size={24} />
+        <div className="space-y-4">
+          <div className="glass-panel rounded-2xl p-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600">
+                <FileSpreadsheet size={24} />
+              </div>
+              <div>
+                <h3 className="text-slate-900 font-semibold">{fileName}</h3>
+                <p className="text-slate-500 text-sm">Lastet inn {dataset.length} rader</p>
+              </div>
             </div>
+            <button 
+              onClick={clearData}
+              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              title="Fjern fil"
+            >
+              <Trash2 size={20} />
+            </button>
+          </div>
+
+          <div className="glass-panel rounded-2xl p-6">
+            <h3 className="text-lg font-semibold mb-4 text-slate-800">Kolonnekonfigurasjon</h3>
             <div>
-              <h3 className="text-slate-900 font-semibold">{fileName}</h3>
-              <p className="text-slate-500 text-sm">Lastet inn {dataset.length} rader</p>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Hvilken kolonne inneholder teksten som skal analyseres?
+              </label>
+              <select 
+                value={textColumn}
+                onChange={(e) => setTextColumn(e.target.value)}
+                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              >
+                {columns.map(col => (
+                  <option key={col} value={col}>{col}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-2">
+                Appen har valgt den mest sannsynlige kolonnen automatisk. Du kan overstyre valget her hvis det er feil.
+              </p>
             </div>
           </div>
-          <button 
-            onClick={clearData}
-            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-            title="Fjern fil"
-          >
-            <Trash2 size={20} />
-          </button>
         </div>
       )}
     </div>
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, provider, model, targetConcept, categories }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, provider, model, targetConcept, categories, textColumn }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -391,7 +436,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, targetConcep
         id: i + idx + 1 // Add a temporary ID for prompt linking
       }));
 
-      const prompt = buildUserMessage(batch);
+      const prompt = buildUserMessage(batch, textColumn);
 
       try {
         const response = await fetch('/api/analyze', {
