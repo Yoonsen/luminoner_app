@@ -124,14 +124,8 @@ export default function Home() {
 
       {/* Main Content Area */}
       <main className="flex-1 p-8 overflow-y-auto">
-        <motion.div 
-          key={activeTab}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="max-w-4xl mx-auto"
-        >
-          {activeTab === 'config' && (
+        <div className="max-w-4xl mx-auto">
+          <div style={{ display: activeTab === 'config' ? 'block' : 'none' }}>
             <ConfigPanel 
               apiKey={apiKey} 
               setApiKey={setApiKey} 
@@ -144,16 +138,16 @@ export default function Home() {
               categories={categories}
               setCategories={setCategories}
             />
-          )}
-          {activeTab === 'data' && (
+          </div>
+          <div style={{ display: activeTab === 'data' ? 'block' : 'none' }}>
             <DataPanel 
               handleFileUpload={handleFileUpload}
               dataset={dataset}
               fileName={fileName}
               clearData={clearData}
             />
-          )}
-          {activeTab === 'results' && (
+          </div>
+          <div style={{ display: activeTab === 'results' ? 'block' : 'none' }}>
             <ResultsPanel 
               dataset={dataset} 
               fileName={fileName} 
@@ -163,8 +157,8 @@ export default function Home() {
               targetConcept={targetConcept}
               categories={categories}
             />
-          )}
-        </motion.div>
+          </div>
+        </div>
       </main>
     </div>
   );
