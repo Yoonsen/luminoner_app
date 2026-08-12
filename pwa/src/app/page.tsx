@@ -336,7 +336,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData }: any) {
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, targetConcept }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, targetConcept, categories }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -351,17 +351,12 @@ function ResultsPanel({ dataset, fileName, apiKey, targetConcept }: any) {
     setProgress(0);
     setResults([]);
 
-    // Dummy categories for testing
-    const categories = [
-      { id: '1', key: 'Sentimentalitet', values: 'Positiv, Negativ, Nøytral' }
-    ];
-
     // Build the system prompt using our new lib
     const { buildSystemPrompt, buildUserMessage } = await import('@/lib/prompt');
     const systemPrompt = buildSystemPrompt(targetConcept, categories);
 
     const batchSize = 10;
-    const allResults = [];
+    const allResults: any[] = [];
     
     // Process dataset in batches
     for (let i = 0; i < dataset.length; i += batchSize) {
