@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   Settings, 
   Upload, 
@@ -550,6 +550,8 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
   
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -572,6 +574,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
     setResults([]);
     setStartTime(Date.now());
     setElapsedSeconds(0);
+    cancelRef.current = false;
 
     // Build the system prompt using our new lib
     const { buildSystemPrompt, buildUserMessage } = await import('@/lib/prompt');
@@ -647,7 +650,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
     // Worker pool for concurrency
     const queue = [...batches];
     const workers = Array(concurrency).fill(null).map(async () => {
-      while (queue.length > 0 && !hasError) {
+      while (queue.length > 0 && !hasError && !cancelRef.current) {
         const batch = queue.shift();
         if (batch) await processBatch(batch);
       }
@@ -657,6 +660,9 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
 
     setIsRunning(false);
     setProgress(100);
+    if (cancelRef.current) {
+      alert("Prosesseringen ble avbrutt.");
+    }
   };
 
   const exportCSV = () => {
@@ -698,6 +704,14 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
             >
               <Download size={18} />
               Eksportér CSV
+            </button>
+          )}
+          {isRunning && (
+            <button 
+              onClick={() => { cancelRef.current = true; }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-all shadow-sm bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+            >
+              Avbryt
             </button>
           )}
           <button 
