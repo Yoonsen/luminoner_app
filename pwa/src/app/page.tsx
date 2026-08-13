@@ -12,7 +12,8 @@ import {
   Trash2,
   FileSpreadsheet,
   Plus,
-  Download
+  Download,
+  Home as HomeIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Papa from 'papaparse';
@@ -24,7 +25,7 @@ type ProcessedRow = any; // Will refine later
 import { CategoryField } from '@/lib/prompt';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'config' | 'data' | 'results'>('config');
+  const [activeTab, setActiveTab] = useState<'home' | 'config' | 'data' | 'results'>('home');
   
   // App State
   const [apiKey, setApiKey] = useState('');
@@ -108,6 +109,12 @@ export default function Home() {
 
           <div className="space-y-1">
             <NavItem 
+              icon={<HomeIcon size={18} />} 
+              label="Hjem" 
+              active={activeTab === 'home'} 
+              onClick={() => setActiveTab('home')} 
+            />
+            <NavItem 
               icon={<Settings size={18} />} 
               label="Konfigurasjon" 
               active={activeTab === 'config'} 
@@ -142,6 +149,9 @@ export default function Home() {
       {/* Main Content Area */}
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-4xl mx-auto">
+          <div style={{ display: activeTab === 'home' ? 'block' : 'none' }}>
+            <WelcomePanel setActiveTab={setActiveTab} />
+          </div>
           <div style={{ display: activeTab === 'config' ? 'block' : 'none' }}>
             <ConfigPanel 
               apiKey={apiKey} 
@@ -197,6 +207,79 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
       {icon}
       {label}
     </button>
+  );
+}
+
+function WelcomePanel({ setActiveTab }: { setActiveTab: (tab: any) => void }) {
+  return (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <header className="mb-8 text-center max-w-2xl mx-auto">
+        <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-4">Luminoner 2.0</h2>
+        <p className="text-lg text-slate-500 leading-relaxed">
+          Fragment-basert tolkning med store språkmodeller for digital humaniora.
+        </p>
+      </header>
+
+      <div className="glass-panel rounded-3xl p-8 shadow-sm">
+        <h3 className="text-2xl font-bold mb-4 text-brand-900">Hva er en luminon?</h3>
+        <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed">
+          <p className="mb-4">
+            En <strong>luminon</strong> er en mikro-tolkning av et kort tekstfragment (typisk en konkordanslinje). 
+            Istedenfor at en språkmodell fritt oppsummerer en hel tekst, instrueres den til å tolke et spesifikt, markert mål-uttrykk 
+            i sin umiddelbare kontekst.
+          </p>
+          <p className="mb-4">
+            Resultatet er ikke et fritt tekstsvar, men en strukturert post som kombinerer:
+          </p>
+          <ul className="list-disc pl-6 space-y-2 mb-6 text-slate-700">
+            <li><strong>Top-down kategorier:</strong> Forhåndsdefinerte forskningskategorier gitt av analytikeren (f.eks. betydninger, følelser, sosiale roller).</li>
+            <li><strong>Bottom-up karakteristikker:</strong> Korte, fremvoksende stikkord generert av modellen for å beskrive det som er mest fremtredende i fragmentet.</li>
+            <li><strong>Begrunnelse (Justification):</strong> En kort forklaring på hvorfor modellen valgte som den gjorde, med utgangspunkt i selve beviset i teksten.</li>
+          </ul>
+          <p>
+            Dette bygger bro mellom <em>close reading</em> (nærlesning) og <em>distant reading</em> (distanselesning), 
+            ved at hver eneste forekomst tolkes <em>forut</em> for aggregeringen. Hver tolkning gjøres eksplisitt, 
+            strukturert, etterprøvbar og aggregarbar over tid, sjangre og arkiver.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
+          <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center font-bold text-xl mb-4">1</div>
+          <h4 className="font-semibold text-slate-900 mb-2">Konfigurasjon</h4>
+          <p className="text-sm text-slate-500 mb-4">Definer kategoriene du leter etter, og velg språkmodell og API-nøkkel.</p>
+          <div className="w-full h-32 bg-slate-100 rounded-xl border border-slate-200 border-dashed flex items-center justify-center text-xs text-slate-400">
+            [ Skjermbilde plassholder ]
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
+          <div className="w-12 h-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center font-bold text-xl mb-4">2</div>
+          <h4 className="font-semibold text-slate-900 mb-2">Last opp data</h4>
+          <p className="text-sm text-slate-500 mb-4">Last inn datafilen med tekstfragmentene du ønsker å annotere.</p>
+          <div className="w-full h-32 bg-slate-100 rounded-xl border border-slate-200 border-dashed flex items-center justify-center text-xs text-slate-400">
+            [ Skjermbilde plassholder ]
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
+          <div className="w-12 h-12 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center font-bold text-xl mb-4">3</div>
+          <h4 className="font-semibold text-slate-900 mb-2">Analyser</h4>
+          <p className="text-sm text-slate-500 mb-4">La språkmodellen bygge luminoner som du kan eksportere og aggregere.</p>
+          <div className="w-full h-32 bg-slate-100 rounded-xl border border-slate-200 border-dashed flex items-center justify-center text-xs text-slate-400">
+            [ Skjermbilde plassholder ]
+          </div>
+        </div>
+      </div>
+
+      <div className="text-center pt-8">
+        <button 
+          onClick={() => setActiveTab('config')}
+          className="bg-brand-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-brand-700 transition-colors shadow-sm"
+        >
+          Kom i gang
+        </button>
+      </div>
+    </div>
   );
 }
 
