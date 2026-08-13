@@ -101,7 +101,7 @@ export default function Home() {
     <div className="min-h-screen bg-slate-50 text-slate-900 flex font-sans">
       
       {/* Sidebar Navigation */}
-      <nav className="w-64 bg-white border-r border-slate-200 p-4 flex flex-col justify-between">
+      <nav className="w-64 h-screen sticky top-0 overflow-y-auto bg-white border-r border-slate-200 p-4 flex flex-col justify-between">
         <div>
           <div className="flex items-center gap-2 mb-8 px-2">
             <div className="w-8 h-8 rounded bg-brand-600 flex items-center justify-center text-white font-bold">
