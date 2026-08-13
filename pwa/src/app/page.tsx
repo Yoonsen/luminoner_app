@@ -436,7 +436,7 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProv = e.target.value;
     setProvider(newProv);
-    if (newProv === 'OpenAI') setModel('gpt-5-mini');
+    if (newProv === 'OpenAI') setModel('gpt-4o-mini');
     else if (newProv === 'Anthropic') setModel('claude-3-5-sonnet-20240620');
     else if (newProv === 'Google') setModel('gemini-1.5-flash');
   };
@@ -486,7 +486,6 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
                 <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
                   <option value="gemini-1.5-flash">gemini-1.5-flash (Lav pris)</option>
                   <option value="gemini-1.5-pro">gemini-1.5-pro (Medium pris)</option>
-                  <option value="gemma-2-9b-it">gemma-2-9b-it (Åpen / Lav pris)</option>
                 </select>
               )}
             </div>
