@@ -6,7 +6,6 @@ export type CategoryField = {
 };
 
 export function buildSystemPrompt(
-  targetConcept: string,
   categories: CategoryField[]
 ): string {
   const targetMarkerLeft = "<b>";

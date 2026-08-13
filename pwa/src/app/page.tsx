@@ -31,7 +31,6 @@ export default function Home() {
   const [provider, setProvider] = useState('OpenAI');
   const [model, setModel] = useState('gpt-5-mini');
   const [temperature, setTemperature] = useState<number>(1);
-  const [targetConcept, setTargetConcept] = useState('');
   const [categories, setCategories] = useState<CategoryField[]>([
     { id: '1', key: 'Sentimentalitet', values: 'Positiv, Negativ, Nøytral' }
   ]);
@@ -153,8 +152,6 @@ export default function Home() {
               setModel={setModel}
               temperature={temperature}
               setTemperature={setTemperature}
-              targetConcept={targetConcept}
-              setTargetConcept={setTargetConcept}
               categories={categories}
               setCategories={setCategories}
             />
@@ -177,7 +174,6 @@ export default function Home() {
               provider={provider}
               model={model}
               temperature={temperature}
-              targetConcept={targetConcept}
               categories={categories}
               textColumn={textColumn}
             />
@@ -204,7 +200,7 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature, targetConcept, setTargetConcept, categories, setCategories }: any) {
+function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature, categories, setCategories }: any) {
   
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProv = e.target.value;
@@ -242,17 +238,6 @@ function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel
         </h3>
         
         <div className="space-y-4">
-          <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm focus-within:ring-2 ring-brand-500/20 focus-within:border-brand-500 transition-all">
-            <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Target Concept</label>
-            <input 
-              type="text"
-              value={targetConcept}
-              onChange={(e) => setTargetConcept(e.target.value)}
-              placeholder="F.eks. 'Natur', 'Klima', 'Bjørn'..."
-              className="w-full text-slate-900 font-medium bg-transparent focus:outline-none"
-            />
-          </div>
-          
           <div className="space-y-3 mt-4">
             <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-2">Dine Kategori-felt</label>
             {categories.map((cat: CategoryField) => (
@@ -449,7 +434,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, targetConcept, categories, textColumn }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, categories, textColumn }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -466,7 +451,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
 
     // Build the system prompt using our new lib
     const { buildSystemPrompt, buildUserMessage } = await import('@/lib/prompt');
-    const systemPrompt = buildSystemPrompt(targetConcept, categories);
+    const systemPrompt = buildSystemPrompt(categories);
 
     const batchSize = 10;
     const allResults: any[] = [];
