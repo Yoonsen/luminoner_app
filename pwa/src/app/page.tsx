@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { 
   Settings, 
   Upload, 
@@ -547,33 +547,57 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
+  
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRunning && startTime) {
+      interval = setInterval(() => {
+        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isRunning, startTime]);
 
   const startBatch = async () => {
     if (!apiKey) {
-      alert("Du må legge inn en API-nøkkel i konfigurasjonen først!");
+      alert("Du må legge inn API-nøkkel i Innstillinger først.");
       return;
     }
-    
+
     setIsRunning(true);
     setProgress(0);
     setResults([]);
+    setStartTime(Date.now());
+    setElapsedSeconds(0);
 
     // Build the system prompt using our new lib
     const { buildSystemPrompt, buildUserMessage } = await import('@/lib/prompt');
     const systemPrompt = buildSystemPrompt(categories);
 
     const batchSize = 10;
+    const concurrency = 3; // Antall samtidige kall mot APIet
     const allResults: any[] = [];
     
-    // Process dataset in batches
+    // Del opp i batcher på forhånd
+    const batches = [];
     for (let i = 0; i < dataset.length; i += batchSize) {
-      const batch = dataset.slice(i, i + batchSize).map((r: any, idx: number) => ({
+      batches.push(dataset.slice(i, i + batchSize).map((r: any, idx: number) => ({
         ...r,
-        id: i + idx + 1 // Add a temporary ID for prompt linking
-      }));
+        id: i + idx + 1 // Midlertidig ID
+      })));
+    }
+
+    let processedCount = 0;
+    let hasError = false;
+
+    // Funksjon for å prosessere én enkelt batch
+    const processBatch = async (batch: any[]) => {
+      if (hasError) return; // Stopp hvis noe allerede har feilet fatalt
 
       const prompt = buildUserMessage(batch, textColumn);
-
       try {
         const response = await fetch('/api/analyze', {
           method: 'POST',
@@ -593,32 +617,43 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
         if (data.error) {
           console.error("API Feil:", data.error);
           alert("Feil under kjøring: " + data.error);
-          break; // Stop on API error
+          hasError = true;
+          return;
         }
 
-        // Try to parse the raw text output from LLM as JSON
         const rawText = data.result || "";
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
           if (parsed.items) {
-            // Merge original row with LLM output
             parsed.items.forEach((item: any) => {
               const originalRow = batch.find((r: any) => r.id === item.id);
               if (originalRow) {
                 allResults.push({ ...originalRow, ...item });
               }
             });
-            setResults([...allResults]); // Trigger re-render
+            setResults([...allResults]); 
           }
         }
       } catch (err) {
         console.error("Batch feilet:", err);
       }
 
-      setProgress(Math.min(100, Math.round(((i + batchSize) / dataset.length) * 100)));
-    }
+      processedCount += batch.length;
+      setProgress(Math.min(100, Math.round((processedCount / dataset.length) * 100)));
+    };
+
+    // Worker pool for concurrency
+    const queue = [...batches];
+    const workers = Array(concurrency).fill(null).map(async () => {
+      while (queue.length > 0 && !hasError) {
+        const batch = queue.shift();
+        if (batch) await processBatch(batch);
+      }
+    });
+
+    await Promise.all(workers);
 
     setIsRunning(false);
     setProgress(100);
@@ -686,12 +721,18 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
             <span>Fremdrift</span>
             <span>{progress}%</span>
           </div>
-          <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+          <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden mb-3">
             <div 
               className="bg-brand-500 h-2.5 rounded-full transition-all duration-500 ease-out" 
               style={{ width: `${progress}%` }}
             ></div>
           </div>
+          {isRunning && elapsedSeconds > 0 && (
+            <div className="text-xs text-slate-500 flex justify-between font-mono bg-slate-50 p-2 rounded-lg">
+              <span>{results.length} rader fullført</span>
+              <span className="text-brand-600 font-semibold">{Math.round((results.length / elapsedSeconds) * 60)} rader / min</span>
+            </div>
+          )}
         </div>
       ) : null}
 
