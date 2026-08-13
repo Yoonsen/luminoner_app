@@ -395,7 +395,7 @@ function CategoryPanel({ categories, setCategories }: any) {
                     onChange={(e) => updateCategory(cat.id, 'key', e.target.value)}
                     placeholder="Kategorinavn"
                     autoComplete="off"
-                    className="font-medium text-slate-800 bg-transparent focus:outline-none w-[90%]"
+                    className="font-medium text-slate-800 bg-transparent focus:outline-none w-[90%] hover:bg-slate-100 focus:bg-slate-100 px-2 py-1 -ml-2 rounded-lg transition-colors border border-transparent hover:border-slate-200 focus:border-brand-300"
                   />
                 </div>
                 <div>
@@ -415,7 +415,7 @@ function CategoryPanel({ categories, setCategories }: any) {
                     onChange={(e) => updateCategory(cat.id, 'prompt_note', e.target.value)}
                     placeholder="Ekstra instruks/prompt for dette feltet (valgfritt)"
                     autoComplete="off"
-                    className="text-xs text-slate-500 w-full focus:outline-none italic"
+                    className="text-xs text-slate-500 w-full bg-transparent focus:outline-none italic hover:bg-slate-100 focus:bg-slate-100 px-2 py-1 -ml-2 rounded-lg transition-colors border border-transparent hover:border-slate-200 focus:border-brand-300"
                   />
                 </div>
               </div>
