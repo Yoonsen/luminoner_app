@@ -25,7 +25,7 @@ type ProcessedRow = any; // Will refine later
 import { CategoryField } from '@/lib/prompt';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'home' | 'config' | 'data' | 'results'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'categories' | 'data' | 'results' | 'settings'>('home');
   
   // App State
   const [apiKey, setApiKey] = useState('');
@@ -115,10 +115,10 @@ export default function Home() {
               onClick={() => setActiveTab('home')} 
             />
             <NavItem 
-              icon={<Settings size={18} />} 
-              label="Konfigurasjon" 
-              active={activeTab === 'config'} 
-              onClick={() => setActiveTab('config')} 
+              icon={<LayoutTemplate size={18} />} 
+              label="Kategorier" 
+              active={activeTab === 'categories'} 
+              onClick={() => setActiveTab('categories')} 
             />
             <NavItem 
               icon={<Database size={18} />} 
@@ -127,21 +127,31 @@ export default function Home() {
               onClick={() => setActiveTab('data')} 
             />
             <NavItem 
-              icon={<FileText size={18} />} 
-              label="Resultater" 
+              icon={<Play size={18} />} 
+              label="Analyse" 
               active={activeTab === 'results'} 
               onClick={() => setActiveTab('results')} 
             />
           </div>
         </div>
 
-        <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-          <p className="text-xs text-slate-500 mb-2">API Tilkobling</p>
-          <div className="flex items-center gap-2 text-sm">
-            <div className={`w-2 h-2 rounded-full ${apiKey.length > 10 ? 'bg-green-500' : 'bg-red-400'}`}></div>
-            <span className="text-slate-600 font-medium">
-              {apiKey.length > 10 ? 'Nøkkel aktiv' : 'Mangler nøkkel'}
-            </span>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <NavItem 
+              icon={<Settings size={18} />} 
+              label="Innstillinger" 
+              active={activeTab === 'settings'} 
+              onClick={() => setActiveTab('settings')} 
+            />
+          </div>
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+            <p className="text-xs text-slate-500 mb-2">API Tilkobling</p>
+            <div className="flex items-center gap-2 text-sm">
+              <div className={`w-2 h-2 rounded-full ${apiKey.length > 10 ? 'bg-green-500' : 'bg-red-400'}`}></div>
+              <span className="text-slate-600 font-medium">
+                {apiKey.length > 10 ? 'Nøkkel aktiv' : 'Mangler nøkkel'}
+              </span>
+            </div>
           </div>
         </div>
       </nav>
@@ -152,8 +162,14 @@ export default function Home() {
           <div style={{ display: activeTab === 'home' ? 'block' : 'none' }}>
             <WelcomePanel setActiveTab={setActiveTab} />
           </div>
-          <div style={{ display: activeTab === 'config' ? 'block' : 'none' }}>
-            <ConfigPanel 
+          <div style={{ display: activeTab === 'categories' ? 'block' : 'none' }}>
+            <CategoryPanel 
+              categories={categories}
+              setCategories={setCategories}
+            />
+          </div>
+          <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+            <SettingsPanel 
               apiKey={apiKey} 
               setApiKey={setApiKey} 
               provider={provider}
@@ -162,8 +178,6 @@ export default function Home() {
               setModel={setModel}
               temperature={temperature}
               setTemperature={setTemperature}
-              categories={categories}
-              setCategories={setCategories}
             />
           </div>
           <div style={{ display: activeTab === 'data' ? 'block' : 'none' }}>
@@ -221,10 +235,10 @@ function WelcomePanel({ setActiveTab }: { setActiveTab: (tab: any) => void }) {
       </header>
 
       <div className="glass-panel rounded-3xl p-8 shadow-sm">
-        <h3 className="text-2xl font-bold mb-4 text-brand-900">Hva er en luminon?</h3>
+        <h3 className="text-2xl font-bold mb-4 text-brand-900">Hva er et luminon?</h3>
         <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed">
           <p className="mb-4">
-            En <strong>luminon</strong> er en mikro-tolkning av et kort tekstfragment (typisk en konkordanslinje). 
+            <strong>Et luminon</strong> er en mikro-tolkning av et kort tekstfragment (typisk en konkordanslinje). 
             Istedenfor at en språkmodell fritt oppsummerer en hel tekst, instrueres den til å tolke et spesifikt, markert mål-uttrykk 
             i sin umiddelbare kontekst.
           </p>
@@ -273,7 +287,7 @@ function WelcomePanel({ setActiveTab }: { setActiveTab: (tab: any) => void }) {
 
       <div className="text-center pt-8">
         <button 
-          onClick={() => setActiveTab('config')}
+          onClick={() => setActiveTab('categories')}
           className="bg-brand-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-brand-700 transition-colors shadow-sm"
         >
           Kom i gang
@@ -283,16 +297,8 @@ function WelcomePanel({ setActiveTab }: { setActiveTab: (tab: any) => void }) {
   );
 }
 
-function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature, categories, setCategories }: any) {
+function CategoryPanel({ categories, setCategories }: any) {
   
-  const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newProv = e.target.value;
-    setProvider(newProv);
-    if (newProv === 'OpenAI') setModel('gpt-5-mini');
-    else if (newProv === 'Anthropic') setModel('claude-3-5-sonnet-20240620');
-    else if (newProv === 'Google') setModel('gemini-1.5-flash');
-  };
-
   const addCategory = () => {
     setCategories([...categories, { id: Date.now().toString(), key: 'Ny kategori', values: '' }]);
   };
@@ -309,7 +315,7 @@ function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel
     <div className="space-y-6">
       <header className="mb-8">
         <h2 className="text-2xl font-bold text-slate-900">Konfigurasjon av Target</h2>
-        <p className="text-slate-500 mt-1">Definer variablene modellen skal se etter.</p>
+        <p className="text-slate-500 mt-1">Definer variablene og egenskapene modellen skal se etter i teksten.</p>
       </header>
 
       <div className="glass-panel rounded-2xl p-6 relative overflow-hidden">
@@ -367,6 +373,26 @@ function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature }: any) {
+  
+  const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newProv = e.target.value;
+    setProvider(newProv);
+    if (newProv === 'OpenAI') setModel('gpt-5-mini');
+    else if (newProv === 'Anthropic') setModel('claude-3-5-sonnet-20240620');
+    else if (newProv === 'Google') setModel('gemini-1.5-flash');
+  };
+
+  return (
+    <div className="space-y-6">
+      <header className="mb-8">
+        <h2 className="text-2xl font-bold text-slate-900">Tekniske Innstillinger</h2>
+        <p className="text-slate-500 mt-1">Velg modell, juster parametere og legg inn API-nøkkel.</p>
+      </header>
 
       <div className="glass-panel rounded-2xl p-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
