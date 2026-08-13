@@ -320,6 +320,37 @@ function CategoryPanel({ categories, setCategories }: any) {
     setCategories(categories.filter((c: CategoryField) => c.id !== id));
   };
 
+  const exportCategories = () => {
+    const json = JSON.stringify(categories, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `luminoner_kategorier_${new Date().getTime()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importCategories = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target?.result as string);
+        if (Array.isArray(parsed)) {
+          setCategories(parsed);
+        } else {
+          alert("Ugyldig filformat (forventet et array av kategorier).");
+        }
+      } catch (err) {
+        alert("Kunne ikke lese JSON-filen.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset
+  };
+
   return (
     <div className="space-y-6">
       <header className="mb-8">
@@ -330,10 +361,21 @@ function CategoryPanel({ categories, setCategories }: any) {
       <div className="glass-panel rounded-2xl p-6 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-brand-500 opacity-5 rounded-full blur-2xl -mr-10 -mt-10"></div>
         
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <LayoutTemplate size={18} className="text-brand-500" />
-          Kategorier (Top-down)
-        </h3>
+        <div className="flex justify-between items-center mb-4 relative z-10">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <LayoutTemplate size={18} className="text-brand-500" />
+            Kategorier (Top-down)
+          </h3>
+          <div className="flex gap-2">
+            <button onClick={exportCategories} className="text-xs flex items-center gap-1 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
+              <Download size={14} /> Eksporter (JSON)
+            </button>
+            <label className="text-xs flex items-center gap-1 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors shadow-sm cursor-pointer">
+              <Upload size={14} /> Importer (JSON)
+              <input type="file" accept=".json" className="hidden" onChange={importCategories} />
+            </label>
+          </div>
+        </div>
         
         <div className="space-y-4">
           <div className="space-y-3 mt-4">
@@ -590,6 +632,9 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
   
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
+  const [systemPromptPreview, setSystemPromptPreview] = useState('');
+  const [userPromptPreview, setUserPromptPreview] = useState('');
   
   const cancelRef = useRef(false);
 
@@ -602,6 +647,18 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
     }
     return () => clearInterval(interval);
   }, [isRunning, startTime]);
+
+  // Generer preview av prompts (for inspeksjon før man kjører)
+  useEffect(() => {
+    import('@/lib/prompt').then(({ buildSystemPrompt, buildUserMessage }) => {
+      setSystemPromptPreview(buildSystemPrompt(categories, leftMarker, rightMarker));
+      if (dataset.length > 0) {
+        // Ta opptil 3 rader som et eksempel
+        const sample = dataset.slice(0, Math.min(3, dataset.length)).map((r: any, i: number) => ({ ...r, id: i+1 }));
+        setUserPromptPreview(buildUserMessage(sample, textColumn));
+      }
+    });
+  }, [categories, leftMarker, rightMarker, dataset, textColumn]);
 
   const startBatch = async () => {
     if (!apiKey) {
@@ -737,6 +794,13 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
           </p>
         </div>
         <div className="flex gap-3">
+          <button 
+            onClick={() => setShowPromptPreview(!showPromptPreview)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 shadow-sm transition-all"
+          >
+            <FileText size={18} />
+            {showPromptPreview ? 'Skjul Prompt' : 'Vis Prompt'}
+          </button>
           {results.length > 0 && (
             <button 
               onClick={exportCSV}
@@ -769,6 +833,27 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
         </div>
       </header>
       
+      {showPromptPreview && (
+        <div className="glass-panel rounded-2xl p-6 mb-6">
+          <h3 className="text-lg font-semibold mb-4 text-slate-800">Generert Prompt (Forhåndsvisning)</h3>
+          
+          <div className="mb-4">
+            <h4 className="text-xs font-semibold tracking-wider uppercase text-slate-500 mb-2">System Prompt (Instruks)</h4>
+            <div className="bg-slate-900 text-slate-300 p-4 rounded-xl font-mono text-xs overflow-x-auto whitespace-pre-wrap">
+              {systemPromptPreview}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-semibold tracking-wider uppercase text-slate-500 mb-2">User Message (Eksempel på data batch)</h4>
+            <div className="bg-slate-900 text-slate-300 p-4 rounded-xl font-mono text-xs overflow-x-auto whitespace-pre-wrap">
+              {userPromptPreview || "Laster data..."}
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-4 italic">Dette er den nøyaktige teksten som sendes til språkmodellen for å hente ut luminoner. Du kan kopiere dette og lime det inn i ChatGPT, Python (OpenAI SDK), e.l. for manuell kjøring.</p>
+        </div>
+      )}
+
       {isRunning || progress > 0 ? (
         <div className="glass-panel rounded-2xl p-6 mb-6">
           <div className="flex justify-between text-sm font-medium text-slate-700 mb-2">
