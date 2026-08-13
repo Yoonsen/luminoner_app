@@ -38,6 +38,9 @@ export default function Home() {
   const [dataset, setDataset] = useState<ProcessedRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [textColumn, setTextColumn] = useState<string>('');
+  
+  const [leftMarker, setLeftMarker] = useState('<b>');
+  const [rightMarker, setRightMarker] = useState('</b>');
 
   // Auto-detect text column
   const detectTextColumn = (data: any[]) => {
@@ -188,6 +191,10 @@ export default function Home() {
               clearData={clearData}
               textColumn={textColumn}
               setTextColumn={setTextColumn}
+              leftMarker={leftMarker}
+              setLeftMarker={setLeftMarker}
+              rightMarker={rightMarker}
+              setRightMarker={setRightMarker}
             />
           </div>
           <div style={{ display: activeTab === 'results' ? 'block' : 'none' }}>
@@ -200,6 +207,8 @@ export default function Home() {
               temperature={temperature}
               categories={categories}
               textColumn={textColumn}
+              leftMarker={leftMarker}
+              rightMarker={rightMarker}
             />
           </div>
         </div>
@@ -472,7 +481,7 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
   );
 }
 
-function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn, setTextColumn }: any) {
+function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn, setTextColumn, leftMarker, setLeftMarker, rightMarker, setRightMarker }: any) {
   const columns = dataset.length > 0 ? Object.keys(dataset[0]) : [];
 
   return (
@@ -519,22 +528,53 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
 
           <div className="glass-panel rounded-2xl p-6">
             <h3 className="text-lg font-semibold mb-4 text-slate-800">Kolonnekonfigurasjon</h3>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Hvilken kolonne inneholder teksten som skal analyseres?
-              </label>
-              <select 
-                value={textColumn}
-                onChange={(e) => setTextColumn(e.target.value)}
-                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              >
-                {columns.map(col => (
-                  <option key={col} value={col}>{col}</option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500 mt-2">
-                Appen har valgt den mest sannsynlige kolonnen automatisk. Du kan overstyre valget her hvis det er feil.
-              </p>
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Hvilken kolonne inneholder teksten som skal analyseres?
+                </label>
+                <select 
+                  value={textColumn}
+                  onChange={(e) => setTextColumn(e.target.value)}
+                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                >
+                  {columns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-2">
+                  Appen har valgt den mest sannsynlige kolonnen automatisk. Du kan overstyre valget her hvis det er feil.
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Hvilke markører brukes rundt målordet i teksten?
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Venstre markør</label>
+                    <input 
+                      type="text" 
+                      value={leftMarker}
+                      onChange={(e) => setLeftMarker(e.target.value)}
+                      className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Høyre markør</label>
+                    <input 
+                      type="text" 
+                      value={rightMarker}
+                      onChange={(e) => setRightMarker(e.target.value)}
+                      className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-mono text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  Målordet må være markert i teksten din slik at modellen vet nøyaktig hva den skal tolke. Default er `<b>` og `</b>`.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -543,7 +583,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, categories, textColumn }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, categories, textColumn, leftMarker, rightMarker }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -578,7 +618,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
 
     // Build the system prompt using our new lib
     const { buildSystemPrompt, buildUserMessage } = await import('@/lib/prompt');
-    const systemPrompt = buildSystemPrompt(categories);
+    const systemPrompt = buildSystemPrompt(categories, leftMarker, rightMarker);
 
     const batchSize = 10;
     const concurrency = 3; // Antall samtidige kall mot APIet

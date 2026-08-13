@@ -6,10 +6,10 @@ export type CategoryField = {
 };
 
 export function buildSystemPrompt(
-  categories: CategoryField[]
+  categories: CategoryField[],
+  targetMarkerLeft: string = "<b>",
+  targetMarkerRight: string = "</b>"
 ): string {
-  const targetMarkerLeft = "<b>";
-  const targetMarkerRight = "</b>";
   const CATCH_ALL_VALUE = "0";
 
   const fieldNamesDisplay = categories.map((c) => `"${c.key}"`).join(", ");
