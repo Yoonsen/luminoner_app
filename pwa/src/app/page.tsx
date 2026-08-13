@@ -438,7 +438,7 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
     setProvider(newProv);
     if (newProv === 'OpenAI') setModel('gpt-4o-mini');
     else if (newProv === 'Anthropic') setModel('claude-3-5-sonnet-20240620');
-    else if (newProv === 'Google') setModel('gemini-1.5-flash');
+    else if (newProv === 'Google') setModel('gemini-2.5-flash');
   };
 
   return (
@@ -484,10 +484,8 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
               )}
               {provider === 'Google' && (
                 <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
-                  <option value="gemini-1.5-flash">gemini-1.5-flash (Lav pris)</option>
-                  <option value="gemini-1.5-flash-latest">gemini-1.5-flash-latest (Prøv denne ved feil)</option>
-                  <option value="gemini-1.5-pro">gemini-1.5-pro (Medium pris)</option>
-                  <option value="gemini-pro">gemini-pro (Eldre 1.0 modell - EU sikker)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (Anbefalt / Lav pris)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (Medium pris)</option>
                 </select>
               )}
             </div>
