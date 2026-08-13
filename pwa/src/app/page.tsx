@@ -29,7 +29,8 @@ export default function Home() {
   // App State
   const [apiKey, setApiKey] = useState('');
   const [provider, setProvider] = useState('OpenAI');
-  const [model, setModel] = useState('gpt-4o-mini');
+  const [model, setModel] = useState('gpt-5-mini');
+  const [temperature, setTemperature] = useState<number>(1);
   const [targetConcept, setTargetConcept] = useState('');
   const [categories, setCategories] = useState<CategoryField[]>([
     { id: '1', key: 'Sentimentalitet', values: 'Positiv, Negativ, Nøytral' }
@@ -150,6 +151,8 @@ export default function Home() {
               setProvider={setProvider}
               model={model}
               setModel={setModel}
+              temperature={temperature}
+              setTemperature={setTemperature}
               targetConcept={targetConcept}
               setTargetConcept={setTargetConcept}
               categories={categories}
@@ -173,6 +176,7 @@ export default function Home() {
               apiKey={apiKey}
               provider={provider}
               model={model}
+              temperature={temperature}
               targetConcept={targetConcept}
               categories={categories}
               textColumn={textColumn}
@@ -200,8 +204,16 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, targetConcept, setTargetConcept, categories, setCategories }: any) {
+function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature, targetConcept, setTargetConcept, categories, setCategories }: any) {
   
+  const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newProv = e.target.value;
+    setProvider(newProv);
+    if (newProv === 'OpenAI') setModel('gpt-5-mini');
+    else if (newProv === 'Anthropic') setModel('claude-3-5-sonnet-20240620');
+    else if (newProv === 'Google') setModel('gemini-1.5-flash');
+  };
+
   const addCategory = () => {
     setCategories([...categories, { id: Date.now().toString(), key: 'Ny kategori', values: '' }]);
   };
@@ -299,23 +311,53 @@ function ConfigPanel({ apiKey, setApiKey, provider, setProvider, model, setModel
               <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Leverandør</label>
               <select 
                 value={provider} 
-                onChange={(e) => setProvider(e.target.value)}
+                onChange={handleProviderChange}
                 className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               >
                 <option value="OpenAI">OpenAI</option>
                 <option value="Anthropic">Anthropic</option>
-                <option value="Google">Google (Gemini)</option>
+                <option value="Google">Google</option>
               </select>
             </div>
             <div>
               <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">Modell</label>
-              <input 
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="F.eks gpt-4o-mini"
-                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              />
+              {provider === 'OpenAI' && (
+                <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
+                  <option value="gpt-5-mini">gpt-5-mini (Anbefalt / Lav pris)</option>
+                  <option value="gpt-4o-mini">gpt-4o-mini (Lav pris)</option>
+                  <option value="gpt-4o">gpt-4o (Høy pris)</option>
+                </select>
+              )}
+              {provider === 'Anthropic' && (
+                <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
+                  <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (Medium pris)</option>
+                  <option value="claude-3-haiku-20240307">Claude 3 Haiku (Lav pris)</option>
+                </select>
+              )}
+              {provider === 'Google' && (
+                <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
+                  <option value="gemini-1.5-flash">gemini-1.5-flash (Lav pris)</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro (Medium pris)</option>
+                  <option value="gemma-2-9b-it">gemma-2-9b-it (Åpen / Lav pris)</option>
+                </select>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold tracking-wider uppercase text-slate-500 mb-1">
+              Temperatur (Kreativitet: {temperature})
+            </label>
+            <input 
+              type="range" 
+              min="0" max="2" step="0.1" 
+              value={temperature}
+              onChange={(e) => setTemperature(parseFloat(e.target.value))}
+              className="w-full accent-brand-500"
+            />
+            <div className="flex justify-between text-xs text-slate-400 mt-1">
+              <span>0.0 (Fokusert)</span>
+              <span>1.0 (Balansert)</span>
+              <span>2.0 (Kreativ)</span>
             </div>
           </div>
           <div>
@@ -407,7 +449,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, provider, model, targetConcept, categories, textColumn }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, targetConcept, categories, textColumn }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -447,7 +489,8 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, targetConcep
             model,
             apiKey,
             systemPrompt,
-            prompt
+            prompt,
+            temperature
           })
         });
 

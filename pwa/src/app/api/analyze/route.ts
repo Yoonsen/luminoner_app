@@ -9,7 +9,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { provider, model, apiKey, systemPrompt, prompt } = body;
+    const { provider, model, apiKey, systemPrompt, prompt, temperature } = body;
 
     if (!apiKey) {
       return NextResponse.json({ error: 'Mangler API-nøkkel' }, { status: 400 });
@@ -30,12 +30,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Ugyldig tilbyder' }, { status: 400 });
     }
 
+    const tempVal = temperature !== undefined ? parseFloat(temperature) : 0.1;
+
     // Kall modellen ved bruk av Vercel AI SDK
     const { text } = await generateText({
       model: llmModel,
       system: systemPrompt,
       prompt: prompt,
-      temperature: 0.1, // Lav temperatur for JSON-ekstraksjon
+      temperature: tempVal,
     });
 
     return NextResponse.json({ result: text });
