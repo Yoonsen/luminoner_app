@@ -394,6 +394,7 @@ function CategoryPanel({ categories, setCategories }: any) {
                     value={cat.key}
                     onChange={(e) => updateCategory(cat.id, 'key', e.target.value)}
                     placeholder="Kategorinavn"
+                    autoComplete="off"
                     className="font-medium text-slate-800 bg-transparent focus:outline-none w-[90%]"
                   />
                 </div>
@@ -403,6 +404,7 @@ function CategoryPanel({ categories, setCategories }: any) {
                     value={cat.values}
                     onChange={(e) => updateCategory(cat.id, 'values', e.target.value)}
                     placeholder="Mulige verdier (kommaseparert)"
+                    autoComplete="off"
                     className="text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-lg w-full focus:outline-none focus:ring-1 ring-brand-500/30"
                   />
                 </div>
@@ -412,6 +414,7 @@ function CategoryPanel({ categories, setCategories }: any) {
                     value={cat.prompt_note || ''}
                     onChange={(e) => updateCategory(cat.id, 'prompt_note', e.target.value)}
                     placeholder="Ekstra instruks/prompt for dette feltet (valgfritt)"
+                    autoComplete="off"
                     className="text-xs text-slate-500 w-full focus:outline-none italic"
                   />
                 </div>
@@ -600,6 +603,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
                       type="text" 
                       value={leftMarker}
                       onChange={(e) => setLeftMarker(e.target.value)}
+                      autoComplete="off"
                       className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-mono text-sm"
                     />
                   </div>
@@ -609,6 +613,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
                       type="text" 
                       value={rightMarker}
                       onChange={(e) => setRightMarker(e.target.value)}
+                      autoComplete="off"
                       className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-mono text-sm"
                     />
                   </div>
