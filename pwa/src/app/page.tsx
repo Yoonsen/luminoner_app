@@ -43,7 +43,7 @@ export default function Home() {
   const detectTextColumn = (data: any[]) => {
     if (!data || data.length === 0) return '';
     const keys = Object.keys(data[0]);
-    const preferred = ['concordance', 'concordances', 'fragment', 'text', 'context', 'tekst'];
+    const preferred = ['concordance', 'concordances', 'konkordans', 'konkordanser', 'fragment', 'text', 'context', 'tekst'];
     for (const pref of preferred) {
       const match = keys.find(k => k.toLowerCase() === pref);
       if (match) return match;
