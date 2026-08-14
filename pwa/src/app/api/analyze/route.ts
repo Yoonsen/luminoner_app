@@ -26,6 +26,9 @@ export async function POST(req: Request) {
     } else if (provider === 'Google') {
       const google = createGoogleGenerativeAI({ apiKey });
       llmModel = google(model);
+    } else if (provider === 'DeepSeek') {
+      const deepseek = createOpenAI({ apiKey, baseURL: 'https://api.deepseek.com/v1' });
+      llmModel = deepseek(model);
     } else {
       return NextResponse.json({ error: 'Ugyldig tilbyder' }, { status: 400 });
     }

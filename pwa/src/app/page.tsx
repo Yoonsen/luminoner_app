@@ -28,7 +28,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'home' | 'categories' | 'data' | 'results' | 'settings'>('home');
   
   // App State
-  const [apiKey, setApiKey] = useState('');
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({ OpenAI: '', Anthropic: '', Google: '', DeepSeek: '' });
   const [provider, setProvider] = useState('OpenAI');
   const [model, setModel] = useState('gpt-5-mini');
   const [temperature, setTemperature] = useState<number>(1);
@@ -41,6 +41,37 @@ export default function Home() {
   
   const [leftMarker, setLeftMarker] = useState('<b>');
   const [rightMarker, setRightMarker] = useState('</b>');
+  const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
+
+  // Load config from localStorage
+  useEffect(() => {
+    const savedApiKeys = localStorage.getItem('luminoner_apiKeys');
+    const oldApiKey = localStorage.getItem('luminoner_apiKey');
+    const savedProvider = localStorage.getItem('luminoner_provider');
+    const savedModel = localStorage.getItem('luminoner_model');
+    const savedTemp = localStorage.getItem('luminoner_temperature');
+
+    if (savedApiKeys) {
+      try { setApiKeys(JSON.parse(savedApiKeys)); } catch(e) {}
+    } else if (oldApiKey) {
+      setApiKeys(prev => ({ ...prev, [savedProvider || 'OpenAI']: oldApiKey }));
+    }
+    
+    if (savedProvider) setProvider(savedProvider);
+    if (savedModel) setModel(savedModel);
+    if (savedTemp) setTemperature(parseFloat(savedTemp));
+    
+    setHasLoadedConfig(true);
+  }, []);
+
+  // Save config to localStorage
+  useEffect(() => {
+    if (!hasLoadedConfig) return;
+    localStorage.setItem('luminoner_apiKeys', JSON.stringify(apiKeys));
+    localStorage.setItem('luminoner_provider', provider);
+    localStorage.setItem('luminoner_model', model);
+    localStorage.setItem('luminoner_temperature', temperature.toString());
+  }, [apiKeys, provider, model, temperature, hasLoadedConfig]);
 
   // Auto-detect text column
   const detectTextColumn = (data: any[]) => {
@@ -69,7 +100,7 @@ export default function Home() {
           const data = results.data as ProcessedRow[];
           setDataset(data);
           setTextColumn(detectTextColumn(data));
-          setActiveTab('results'); // Auto-switch to results/preview
+          setActiveTab('data'); // Bytt til data i stedet for results
         }
       });
     } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
@@ -82,7 +113,7 @@ export default function Home() {
         const data = XLSX.utils.sheet_to_json(ws) as ProcessedRow[];
         setDataset(data);
         setTextColumn(detectTextColumn(data));
-        setActiveTab('results');
+        setActiveTab('data'); // Bytt til data i stedet for results
       };
       reader.readAsBinaryString(file);
     } else {
@@ -95,6 +126,36 @@ export default function Home() {
     setDataset([]);
     setFileName(null);
     setTextColumn('');
+  };
+
+  const exportSettings = () => {
+    const config = { apiKeys, provider, model, temperature };
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'luminoner_config.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importSettings = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const config = JSON.parse(evt.target?.result as string);
+        if (config.apiKeys) setApiKeys(config.apiKeys);
+        if (config.provider) setProvider(config.provider);
+        if (config.model) setModel(config.model);
+        if (config.temperature !== undefined) setTemperature(config.temperature);
+      } catch (err) {
+        alert("Kunne ikke lese konfigurasjonsfilen.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
@@ -150,9 +211,9 @@ export default function Home() {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
             <p className="text-xs text-slate-500 mb-2">API Tilkobling</p>
             <div className="flex items-center gap-2 text-sm">
-              <div className={`w-2 h-2 rounded-full ${apiKey.length > 10 ? 'bg-green-500' : 'bg-red-400'}`}></div>
+              <div className={`w-2 h-2 rounded-full ${(apiKeys[provider] || '').length > 10 ? 'bg-green-500' : 'bg-red-400'}`}></div>
               <span className="text-slate-600 font-medium">
-                {apiKey.length > 10 ? 'Nøkkel aktiv' : 'Mangler nøkkel'}
+                {(apiKeys[provider] || '').length > 10 ? 'Nøkkel aktiv' : 'Mangler nøkkel'}
               </span>
             </div>
           </div>
@@ -173,14 +234,16 @@ export default function Home() {
           </div>
           <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
             <SettingsPanel 
-              apiKey={apiKey} 
-              setApiKey={setApiKey} 
+              apiKey={apiKeys[provider] || ''} 
+              setApiKey={(val: string) => setApiKeys(prev => ({ ...prev, [provider]: val }))} 
               provider={provider}
               setProvider={setProvider}
               model={model}
               setModel={setModel}
               temperature={temperature}
               setTemperature={setTemperature}
+              exportSettings={exportSettings}
+              importSettings={importSettings}
             />
           </div>
           <div style={{ display: activeTab === 'data' ? 'block' : 'none' }}>
@@ -195,13 +258,14 @@ export default function Home() {
               setLeftMarker={setLeftMarker}
               rightMarker={rightMarker}
               setRightMarker={setRightMarker}
+              setActiveTab={setActiveTab}
             />
           </div>
           <div style={{ display: activeTab === 'results' ? 'block' : 'none' }}>
             <ResultsPanel 
               dataset={dataset} 
               fileName={fileName} 
-              apiKey={apiKey}
+              apiKey={apiKeys[provider] || ''}
               provider={provider}
               model={model}
               temperature={temperature}
@@ -431,7 +495,7 @@ function CategoryPanel({ categories, setCategories }: any) {
   );
 }
 
-function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature }: any) {
+function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setModel, temperature, setTemperature, exportSettings, importSettings }: any) {
   
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProv = e.target.value;
@@ -439,13 +503,25 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
     if (newProv === 'OpenAI') setModel('gpt-4o-mini');
     else if (newProv === 'Anthropic') setModel('claude-3-5-sonnet-20240620');
     else if (newProv === 'Google') setModel('gemini-2.5-flash');
+    else if (newProv === 'DeepSeek') setModel('deepseek-chat');
   };
 
   return (
     <div className="space-y-6">
-      <header className="mb-8">
-        <h2 className="text-2xl font-bold text-slate-900">Tekniske Innstillinger</h2>
-        <p className="text-slate-500 mt-1">Velg modell, juster parametere og legg inn API-nøkkel.</p>
+      <header className="mb-8 flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Tekniske Innstillinger</h2>
+          <p className="text-slate-500 mt-1">Velg modell, juster parametere og legg inn API-nøkkel.</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={exportSettings} className="text-xs flex items-center gap-1 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
+            <Download size={14} /> Eksporter (JSON)
+          </button>
+          <label className="text-xs flex items-center gap-1 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors shadow-sm cursor-pointer">
+            <Upload size={14} /> Importer (JSON)
+            <input type="file" accept=".json" className="hidden" onChange={importSettings} />
+          </label>
+        </div>
       </header>
 
       <div className="glass-panel rounded-2xl p-6">
@@ -465,6 +541,7 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
                 <option value="OpenAI">OpenAI</option>
                 <option value="Anthropic">Anthropic</option>
                 <option value="Google">Google</option>
+                <option value="DeepSeek">DeepSeek</option>
               </select>
             </div>
             <div>
@@ -486,6 +563,12 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
                 <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
                   <option value="gemini-2.5-flash">gemini-2.5-flash (Anbefalt / Lav pris)</option>
                   <option value="gemini-2.5-pro">gemini-2.5-pro (Medium pris)</option>
+                </select>
+              )}
+              {provider === 'DeepSeek' && (
+                <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20">
+                  <option value="deepseek-chat">deepseek-chat (V3 - Lav pris)</option>
+                  <option value="deepseek-reasoner">deepseek-reasoner (R1 - Medium pris)</option>
                 </select>
               )}
             </div>
@@ -525,7 +608,7 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
   );
 }
 
-function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn, setTextColumn, leftMarker, setLeftMarker, rightMarker, setRightMarker }: any) {
+function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn, setTextColumn, leftMarker, setLeftMarker, rightMarker, setRightMarker, setActiveTab }: any) {
   const columns = dataset.length > 0 ? Object.keys(dataset[0]) : [];
 
   return (
@@ -622,6 +705,16 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
                 </p>
               </div>
             </div>
+          </div>
+          
+          <div className="flex justify-end pt-4">
+            <button
+              onClick={() => setActiveTab('results')}
+              className="px-6 py-3 bg-brand-600 text-white font-medium rounded-xl hover:bg-brand-700 hover:shadow-lg hover:shadow-brand-500/20 transition-all flex items-center gap-2"
+            >
+              <Play size={18} />
+              Gå til Analyse
+            </button>
           </div>
         </div>
       )}
