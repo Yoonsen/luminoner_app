@@ -600,7 +600,11 @@ function SettingsPanel({ apiKey, setApiKey, provider, setProvider, model, setMod
               autoComplete="new-password"
               className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
             />
-            <p className="text-xs text-slate-500 mt-1">Nøkkelen lagres kun lokalt i nettleseren din.</p>
+            <p className={`text-xs mt-1 transition-colors ${apiKey && apiKey.length > 10 ? 'text-green-600 font-medium' : 'text-slate-500'}`}>
+              {apiKey && apiKey.length > 10 
+                ? `✅ Nøkkel for ${provider} er lagret i nettleseren din.` 
+                : 'Nøkkelen lagres kun lokalt i nettleseren din.'}
+            </p>
           </div>
         </div>
       </div>
