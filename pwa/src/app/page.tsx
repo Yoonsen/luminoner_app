@@ -863,16 +863,12 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
     }
   };
 
-  const exportCSV = () => {
+  const exportExcel = () => {
     if (results.length === 0) return;
-    const csv = Papa.unparse(results);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `luminoner_results_${new Date().getTime()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const worksheet = XLSX.utils.json_to_sheet(results);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Resultater");
+    XLSX.writeFile(workbook, `luminoner_resultater_${new Date().getTime()}.xlsx`);
   };
 
   // Kalkuler chart-data for første kategori (hvis vi har resultater)
@@ -904,11 +900,11 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
           </button>
           {results.length > 0 && (
             <button 
-              onClick={exportCSV}
+              onClick={exportExcel}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 shadow-sm transition-all"
             >
               <Download size={18} />
-              Eksportér CSV
+              Eksportér Excel
             </button>
           )}
           {isRunning && (
