@@ -8,7 +8,9 @@ export type CategoryField = {
 export function buildSystemPrompt(
   categories: CategoryField[],
   targetMarkerLeft: string = "<b>",
-  targetMarkerRight: string = "</b>"
+  targetMarkerRight: string = "</b>",
+  includeReasoning: boolean = true,
+  includeCharacteristics: boolean = true
 ): string {
   const CATCH_ALL_VALUE = "0";
 
@@ -43,9 +45,7 @@ Bruk kategorifeltene ${fieldNamesDisplay || 'som angitt'} til å fordele koder p
 
 Hvis ingen kode passer i et felt, bruk verdien "${CATCH_ALL_VALUE}".
 
-Bruk feltet "karakteristikker" til 0–3 korte stikkord som sier noe om fenomenet
-du undersøker (f.eks. «personlig», «offentlig», «historisk», «ironisk», osv.).
-
+${includeCharacteristics ? 'Bruk feltet "karakteristikker" til 0–3 korte stikkord som sier noe om fenomenet\ndu undersøker (f.eks. «personlig», «offentlig», «historisk», «ironisk», osv.).\n' : ''}
 Ekstra feltkommentarer:
 ${fieldPromptText}
 `.trim();
@@ -64,9 +64,7 @@ ${fieldRulesText}
 
   {
     "id": <int>,                         // samme id som i input
-${jsonFieldLines}
-    "karakteristikker": ["...", "..."],  // 0–3 korte stikkord
-    "begrunnelse": "<maks 15 ord>"
+${jsonFieldLines.replace(/,\n$/, '')}${includeCharacteristics ? ',\n    "karakteristikker": ["...", "..."]' : ''}${includeReasoning ? ',\n    "begrunnelse": "<maks 15 ord>"' : ''}
   }
 
 - Ikke legg til annen tekst, forklaringer eller markdown utenfor dette ene JSON-objektet.

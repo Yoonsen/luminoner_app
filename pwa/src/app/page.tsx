@@ -35,6 +35,8 @@ export default function Home() {
   const [categories, setCategories] = useState<CategoryField[]>([
     { id: '1', key: 'Sentimentalitet', values: 'Positiv, Negativ, Nøytral' }
   ]);
+  const [includeReasoning, setIncludeReasoning] = useState(true);
+  const [includeCharacteristics, setIncludeCharacteristics] = useState(true);
   const [dataset, setDataset] = useState<ProcessedRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [textColumn, setTextColumn] = useState<string>('');
@@ -230,6 +232,10 @@ export default function Home() {
             <CategoryPanel 
               categories={categories}
               setCategories={setCategories}
+              includeReasoning={includeReasoning}
+              setIncludeReasoning={setIncludeReasoning}
+              includeCharacteristics={includeCharacteristics}
+              setIncludeCharacteristics={setIncludeCharacteristics}
             />
           </div>
           <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
@@ -273,6 +279,8 @@ export default function Home() {
               textColumn={textColumn}
               leftMarker={leftMarker}
               rightMarker={rightMarker}
+              includeReasoning={includeReasoning}
+              includeCharacteristics={includeCharacteristics}
             />
           </div>
         </div>
@@ -370,7 +378,7 @@ function WelcomePanel({ setActiveTab }: { setActiveTab: (tab: any) => void }) {
   );
 }
 
-function CategoryPanel({ categories, setCategories }: any) {
+function CategoryPanel({ categories, setCategories, includeReasoning, setIncludeReasoning, includeCharacteristics, setIncludeCharacteristics }: any) {
   
   const addCategory = () => {
     setCategories([...categories, { id: Date.now().toString(), key: 'Ny kategori', values: '' }]);
@@ -385,7 +393,8 @@ function CategoryPanel({ categories, setCategories }: any) {
   };
 
   const exportCategories = () => {
-    const json = JSON.stringify(categories, null, 2);
+    const exportData = { categories, includeReasoning, includeCharacteristics };
+    const json = JSON.stringify(exportData, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -404,8 +413,12 @@ function CategoryPanel({ categories, setCategories }: any) {
         const parsed = JSON.parse(evt.target?.result as string);
         if (Array.isArray(parsed)) {
           setCategories(parsed);
+        } else if (parsed && parsed.categories && Array.isArray(parsed.categories)) {
+          setCategories(parsed.categories);
+          if (parsed.includeReasoning !== undefined) setIncludeReasoning(parsed.includeReasoning);
+          if (parsed.includeCharacteristics !== undefined) setIncludeCharacteristics(parsed.includeCharacteristics);
         } else {
-          alert("Ugyldig filformat (forventet et array av kategorier).");
+          alert("Ugyldig filformat.");
         }
       } catch (err) {
         alert("Kunne ikke lese JSON-filen.");
@@ -489,6 +502,17 @@ function CategoryPanel({ categories, setCategories }: any) {
           <button onClick={addCategory} className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-slate-500 font-medium hover:border-brand-300 hover:text-brand-600 transition-colors flex items-center justify-center gap-2">
             + Legg til ny egenskap/kategori
           </button>
+          
+          <div className="pt-4 border-t border-slate-200 mt-6 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+              <input type="checkbox" checked={includeReasoning} onChange={(e) => setIncludeReasoning(e.target.checked)} className="rounded text-brand-500 focus:ring-brand-500" />
+              Inkluder "Begrunnelse" felt (modellen gir inntil 15 ords forklaring pr rad)
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+              <input type="checkbox" checked={includeCharacteristics} onChange={(e) => setIncludeCharacteristics(e.target.checked)} className="rounded text-brand-500 focus:ring-brand-500" />
+              Inkluder "Karakteristikker" felt (modellen gir 0-3 bunn-opp stikkord)
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -726,7 +750,7 @@ function DataPanel({ handleFileUpload, dataset, fileName, clearData, textColumn,
   );
 }
 
-function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, categories, textColumn, leftMarker, rightMarker }: any) {
+function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature, categories, textColumn, leftMarker, rightMarker, includeReasoning, includeCharacteristics }: any) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<any[]>([]);
@@ -752,7 +776,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
   // Generer preview av prompts (for inspeksjon før man kjører)
   useEffect(() => {
     import('@/lib/prompt').then(({ buildSystemPrompt, buildUserMessage }) => {
-      setSystemPromptPreview(buildSystemPrompt(categories, leftMarker, rightMarker));
+      setSystemPromptPreview(buildSystemPrompt(categories, leftMarker, rightMarker, includeReasoning, includeCharacteristics));
       if (dataset.length > 0) {
         // Ta opptil 3 rader som et eksempel
         const sample = dataset.slice(0, Math.min(3, dataset.length)).map((r: any, i: number) => ({ ...r, id: i+1 }));
@@ -776,7 +800,7 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
 
     // Build the system prompt using our new lib
     const { buildSystemPrompt, buildUserMessage } = await import('@/lib/prompt');
-    const systemPrompt = buildSystemPrompt(categories, leftMarker, rightMarker);
+    const systemPrompt = buildSystemPrompt(categories, leftMarker, rightMarker, includeReasoning, includeCharacteristics);
 
     const batchSize = 10;
     const concurrency = 3; // Antall samtidige kall mot APIet
