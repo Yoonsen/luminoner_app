@@ -904,9 +904,25 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Resultater");
     
-    // Legg til modellnavn i filnavnet
-    const safeModelName = model.replace(/[^a-zA-Z0-9-]/g, '_');
-    XLSX.writeFile(workbook, `luminoner_resultater_${safeModelName}_${new Date().getTime()}.xlsx`);
+    // Legg til et ekstra ark med Metadata og System Prompt
+    const metaData = [
+      { Egenskap: "Dato", Verdi: new Date().toLocaleString() },
+      { Egenskap: "Leverandør", Verdi: provider },
+      { Egenskap: "Modell", Verdi: model },
+      { Egenskap: "Temperatur", Verdi: temperature },
+      { Egenskap: "Bunn-opp karakteristikker", Verdi: includeCharacteristics ? "Ja" : "Nei" },
+      { Egenskap: "Begrunnelse", Verdi: includeReasoning ? "Ja" : "Nei" },
+      { Egenskap: "System Prompt", Verdi: systemPromptPreview }
+    ];
+    const metaWorksheet = XLSX.utils.json_to_sheet(metaData);
+    
+    // Sett bredden på kolonnene i metadata-arket slik at prompten er lesbar
+    metaWorksheet['!cols'] = [{ wch: 25 }, { wch: 100 }];
+    
+    XLSX.utils.book_append_sheet(workbook, metaWorksheet, "Metadata");
+    
+    // Legg til leverandør i filnavnet (siden modellen nå ligger i arket)
+    XLSX.writeFile(workbook, `luminoner_resultater_${provider}_${new Date().getTime()}.xlsx`);
   };
 
   // Kalkuler chart-data for første kategori (hvis vi har resultater)
