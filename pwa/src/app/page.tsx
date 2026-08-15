@@ -136,7 +136,11 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'luminoner_config.json';
+    
+    // Legg til leverandør og modell i filnavnet
+    const safeModelName = model.replace(/[^a-zA-Z0-9-]/g, '_');
+    a.download = `luminoner_config_${provider}_${safeModelName}.json`;
+    
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -889,10 +893,20 @@ function ResultsPanel({ dataset, fileName, apiKey, provider, model, temperature,
 
   const exportExcel = () => {
     if (results.length === 0) return;
-    const worksheet = XLSX.utils.json_to_sheet(results);
+    
+    // Legg til "_Modell" kolonne i output for sporbarhet
+    const enrichedResults = results.map(row => ({
+      ...row,
+      _Modell: model
+    }));
+    
+    const worksheet = XLSX.utils.json_to_sheet(enrichedResults);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Resultater");
-    XLSX.writeFile(workbook, `luminoner_resultater_${new Date().getTime()}.xlsx`);
+    
+    // Legg til modellnavn i filnavnet
+    const safeModelName = model.replace(/[^a-zA-Z0-9-]/g, '_');
+    XLSX.writeFile(workbook, `luminoner_resultater_${safeModelName}_${new Date().getTime()}.xlsx`);
   };
 
   // Kalkuler chart-data for første kategori (hvis vi har resultater)
